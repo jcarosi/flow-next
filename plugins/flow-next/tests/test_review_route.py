@@ -190,6 +190,23 @@ class TestReviewRoute(unittest.TestCase):
         self.assertTrue(r["message"].startswith("NEEDS_HUMAN:"))
         self.assertTrue(receipt.exists())
 
+    def test_cli_session_policy_does_not_gate_host_routes(self) -> None:
+        """Routing and stop decisions must not parse a CLI-only user policy."""
+        (self.root / ".flow/config.json").write_text(
+            json.dumps({"review": {"backend": "host"}}), encoding="utf-8"
+        )
+        receipt = self._receipt(self.root / "host-stop.json", verdict="NEEDS_HUMAN", mode="host")
+        with mock.patch.dict(os.environ, {"FLOW_RE_REVIEW_SESSION": "invalid"}):
+            code, first, err = self._route(self.task_id)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(first["action"], "fanout")
+            self.assertNotIn("re_review_session", first)
+            code, stopped, err = self._route(self.task_id, "--receipt", str(receipt))
+            self.assertEqual(code, 0, err)
+            self.assertEqual(stopped["action"], "stop")
+            self.assertEqual(stopped["reason"], "needs_human")
+            self.assertNotIn("re_review_session", stopped)
+
     def test_deep_overturned_receipt_is_not_resumable(self) -> None:
         receipt = self._receipt(self.root / "r.json", verdict_before_deep="SHIP")
         code, r, _ = self._route(self.task_id, "--receipt", str(receipt))
