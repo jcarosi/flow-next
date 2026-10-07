@@ -36,6 +36,17 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+
+def setUpModule():
+    # Snapshot fixtures pin built-in defaults, independent of user policy.
+    global _stock_session_policy
+    _stock_session_policy = mock.patch.dict(os.environ, {"FLOW_RE_REVIEW_SESSION": "resume"})
+    _stock_session_policy.start()
+
+
+def tearDownModule():
+    _stock_session_policy.stop()
+
 # fn-139.1: the tracker package sits beside flowctl.py; under a test module
 # sys.path[0] is THIS directory, not scripts/, so it would not import.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))

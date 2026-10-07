@@ -95,6 +95,15 @@
           ],
           "default": null
         },
+        "reReviewSession": {
+          "description": "CLI re-review session policy: resume (built-in default) continues the previous reviewer conversation; fresh starts one independent reviewer session after fixes and supplies the full prior-finding container. An explicit project value overrides FLOW_RE_REVIEW_SESSION, which can set a user default. --re-review-session overrides both for one review. First-round fan-out and host review are unchanged.",
+          "type": "string",
+          "enum": [
+            "resume",
+            "fresh"
+          ],
+          "default": "resume"
+        },
         "maxIterations": {
           "description": "Cumulative review-round cap per scope (default 8, minimum 1 - the cap can never be disabled). The env var MAX_REVIEW_ITERATIONS takes precedence over this key. In an autonomous run (flow --auto) this key may only lower the cap, so an autonomous agent cannot extend its own review gate.",
           "type": "integer",

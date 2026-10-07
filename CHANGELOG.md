@@ -6,6 +6,14 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ## Unreleased
 
+### Added
+
+- **Choose independent CLI re-reviews when needed.** `review.reReviewSession=fresh`
+  starts one new Codex, Copilot, Cursor or Claude reviewer session after each fix,
+  carrying the full prior findings and preserving the review route and receipt
+  lineage. `resume` remains the built-in default. `FLOW_RE_REVIEW_SESSION` sets
+  a user default across projects; an explicit project setting or one-call
+  `--re-review-session` takes precedence. First-round panels are unchanged.
 ## [flow-next 8.1.0] - 2026-10-06
 
 Teams that keep specs on feature branches can now see each other's in-flight specs. One command lists every spec across your local branches and the branches your teammates pushed, says which copies carry unmerged changes, and flags the ones whose merge would conflict, in about a second on a repository with 130 branches and 270 specs. Plan's spec scout reads it, so a new plan finds overlapping work on other branches as well as what is checked out. The teams guide now answers the branching question directly: three supported shapes, and the habits (push, fetch, delete merged branches) that keep the picture accurate.

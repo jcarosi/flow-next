@@ -31,6 +31,18 @@ if str(SCRIPTS_DIR) not in sys.path:
 import flowctl  # noqa: E402
 
 
+def setUpModule():
+    # These stock-session tests assert resume behavior even when a developer's
+    # user-level policy selects fresh for ordinary review invocations.
+    global _stock_session_policy
+    _stock_session_policy = mock.patch.dict(os.environ, {"FLOW_RE_REVIEW_SESSION": "resume"})
+    _stock_session_policy.start()
+
+
+def tearDownModule():
+    _stock_session_policy.stop()
+
+
 EPIC_ID = "fn-1-claude-demo"
 TASK_ID = f"{EPIC_ID}.1"
 SID = "11111111-2222-3333-4444-555555555555"

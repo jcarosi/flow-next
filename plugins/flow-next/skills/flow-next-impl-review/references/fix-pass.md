@@ -19,7 +19,8 @@ TASK_ID="$(jq -r '.task_id // empty' <<<"$ROUTE")"; RECEIPT_PATH="$(jq -r '.rece
 "$FLOWCTL" "$BACKEND" impl-review ${TASK_ID:+"$TASK_ID"} --base "$DIFF_BASE" --receipt "$RECEIPT_PATH"
 ```
 
-  The re-review resumes the reviewer's session and its verdict is terminal: report surviving
+  The re-review follows the resolved session policy (`resume` by default; `fresh`
+  starts one independent session with the prior findings). Its verdict is terminal: report surviving
   findings, never start a second fix pass, unless working-rules.md's review loop applies (an
   unattended run, or a request to review until SHIP). In that loop, fix and re-review the same
   way until SHIP or an `ESCALATE:` (round cap or stall). When the reviewer keeps only findings

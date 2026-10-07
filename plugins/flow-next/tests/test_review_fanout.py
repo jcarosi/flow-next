@@ -22,6 +22,17 @@ from pathlib import Path
 from typing import Any, Callable
 from unittest import mock
 
+
+def setUpModule():
+    # Existing fan-out fixtures assert the stock resume contract on round 2.
+    global _stock_session_policy
+    _stock_session_policy = mock.patch.dict(os.environ, {"FLOW_RE_REVIEW_SESSION": "resume"})
+    _stock_session_policy.start()
+
+
+def tearDownModule():
+    _stock_session_policy.stop()
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 

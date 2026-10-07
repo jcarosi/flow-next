@@ -13,12 +13,11 @@ Use when `BACKEND="host"`. Prerequisite: Phase 0 backend detection in [workflow-
 5. Fail closed when no cross-family pin is available (never silent same-family self-review)
 6. **`host` never shells out to another CLI** — a `codex exec` / `cursor-agent` / `claude -p` / `grok` subprocess inside a host review is a broken run; the CLI backends exist for exactly that, and the user chose `host` to avoid them. Dispatch through the harness's own subagent primitive with the model named in the dispatch; an unhonored model request degrades to the session model, and then rule 5 decides — never a CLI fallback
 
-**Host is the documented always-inject exception.** The `codex` backend
-resumes the reviewer's own session on a re-review and therefore sends the
-shrink-only contract WITHOUT re-rendering prior findings; `cursor` and `copilot`
-keep injecting unconditionally until their resume semantics are measured the way
-codex's were (copilot's `--resume` is create-or-resume via a marker, so "resumed"
-and "created" are not separable there). `host` cannot resume at all: rule 3
+**Host always injects.** By default, the `codex` backend resumes the reviewer's
+own session on a re-review and sends the shrink-only contract without re-rendering
+prior findings; with `review.reReviewSession=fresh`, it starts a new CLI session
+and injects them. `cursor` and `copilot` inject unconditionally under either
+policy. `host` cannot resume at all: rule 3
 above makes each re-review a fresh subagent with `session_id: null`, so the
 reviewer holds nothing from the previous round. The prior findings must travel in
 the prompt here, and the reply grammar below is what makes them machine-readable.
