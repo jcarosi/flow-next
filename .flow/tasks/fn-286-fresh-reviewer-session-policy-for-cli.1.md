@@ -13,9 +13,12 @@ Implement the generic opt-in policy for all four CLI review backends, generate s
 - [ ] Generated schema, tracker manifest, Codex mirror, focused tests, full suite and lint are green with no new skips.
 - [ ] Independent read-only review reaches SHIP before installation.
 ## Done summary
-TBD
+Added opt-in fresh CLI re-review sessions with invocation/project/user/default precedence. Software default remains resume. All four CLI adapters preserve full prior findings, provenance, round accounting and read-only controls. Independent Copilot/Opus panel and fresh corrective re-review returned SHIP.
 
+Validation: 4014 tests, 0 failures/errors, 7 existing skips; 119 post-review focused tests; schema, manifest, mirror and Ruff passed.
+
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 950ccaa3cfb912ced40e151c4da63f6a48bc8238, e4a04c4f0273ca4bb076c29e0046fc9ed8d3c45b
+- Tests: FLOW_RE_REVIEW_SESSION=fresh python3 scripts/run_tests_parallel.py --jobs 4, uvx ruff@0.16.0 check ., 119 focused tests after route fix
 - PRs:

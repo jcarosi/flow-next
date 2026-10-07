@@ -1,11 +1,117 @@
 {
   "branch_name": "fn-286-fresh-reviewer-session-policy-for-cli",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-10-07T19:11:30.196125Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-286-fresh-reviewer-session-policy-for-cli",
+  "impl_review_rounds": {
+    "fn-286-fresh-reviewer-session-policy-for-cli.1": 0
+  },
   "next_task": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "review_attempts": [
+    {
+      "artifact_sha256": "46be243f258df9c5a06be6c09de4ed7abdf2205960db46080592d308c5fcfa41",
+      "backend": "copilot",
+      "base_sha": "2777b310375e826a89189c4dfeebba3c094839a3",
+      "counter_kind": "impl",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-2adab2422206f8e4028fbce418197df9",
+            "classification": "introduced",
+            "findingId": "finding-2adab2422206f8e4028fbce418197df9",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "950ccaa3cfb912ced40e151c4da63f6a48bc8238",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 1013,
+      "output_sha256": "30751e58f5b782dde0deb10a1af737799e8568fe3a45478eb8935a560fa29997",
+      "reservation_id": "e1541fba79da451b9f18f7b1a30e3977",
+      "round_consumed": true,
+      "scope": "impl:fn-286-fresh-reviewer-session-policy-for-cli.1",
+      "superseded_by": null,
+      "task": "fn-286-fresh-reviewer-session-policy-for-cli.1",
+      "timestamp": "2026-10-07T19:41:34.187881Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "a9306109c232e07b12df960caa66d40117d4e4c9bc699df856ea4cf70f080d36",
+      "backend": "copilot",
+      "base_sha": "2777b310375e826a89189c4dfeebba3c094839a3",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-2adab2422206f8e4028fbce418197df9",
+            "classification": "introduced",
+            "findingId": "finding-2adab2422206f8e4028fbce418197df9",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "fixed"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 1,
+      "head_sha": "e4a04c4f0273ca4bb076c29e0046fc9ed8d3c45b",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 1494,
+      "output_sha256": "ad996e543199821dcb7fae1fd50bff7bed3499aa4b1aa585abfeb2fa364fc2b8",
+      "reservation_id": "3fc7260c2bd54c9cbb3579b4e5120b53",
+      "round_consumed": true,
+      "scope": "impl:fn-286-fresh-reviewer-session-policy-for-cli.1",
+      "superseded_by": null,
+      "task": "fn-286-fresh-reviewer-session-policy-for-cli.1",
+      "timestamp": "2026-10-07T19:46:18.031859Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "impl:fn-286-fresh-reviewer-session-policy-for-cli.1": 2
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-286-fresh-reviewer-session-policy-for-cli.1": 0
+  },
   "spec_path": ".flow/specs/fn-286-fresh-reviewer-session-policy-for-cli.md",
   "status": "open",
   "title": "Fresh reviewer session policy for CLI re-reviews",
@@ -20,5 +126,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-07T19:11:30.198511Z"
+  "updated_at": "2026-10-07T19:46:18.034607Z"
 }
