@@ -86,7 +86,7 @@ Defaults below are read from the published schema ([`../schema/flow-config.schem
 `review.backend` - **unset by default**; reviews run in-host. Details: [`orchestration.md`](orchestration.md#review-backends-cross-model-review).
 
 - **Automates away:** getting a verdict from a model family that did not write the diff, so the reviewer's blind spots are uncorrelated with the writer's.
-- **Costs:** an out-of-host review pass per review round - roughly three passes on the first round of a large or risky scope, where every backend fans out three concurrent axis draws and merges them into one fix pass (one round against the cap, not three) - a second CLI installed and authenticated, and a fix-and-re-review loop that can run up to `review.maxIterations` rounds before escalating.
+- **Costs:** an out-of-host review pass per review round - roughly three passes on the first round of a large or risky scope, where every backend fans out three axis draws and merges them into one fix pass (one round against the cap, not three) - a second CLI installed and authenticated, and a fix-and-re-review loop that can run up to `review.maxIterations` rounds before escalating.
 - **Earns its keep when:** the diff was written by an agent and will be merged without a human reading it line by line. That is the autonomous profile by definition; in the human-driven profile you are the cross-model reviewer.
 - **Lean invocation:** `/flow-next:impl-review` or `/flow-next:plan-review` on the changes that warrant it, or a per-task `review:` pin, leaving the standing backend unset.
 
@@ -108,7 +108,7 @@ Between the two: `host` trades the second CLI for zero setup while keeping the g
 
 #### Turning the dial: draw topology
 
-On every backend the first review round of a large or risky scope fans out three concurrent axis draws (correctness / contracts / integration) and merges them into one fix pass - a structural trade of parallel review passes for serial fix-and-re-review rounds. The dial is a per-invocation prose instruction, never a flag or config key, and the whole layer is optional to begin with:
+On every backend the first review round of a large or risky scope fans out three axis draws (correctness / contracts / integration) and merges them into one fix pass. CLI draws run concurrently by default, or sequentially with `review.fanoutExecution=sequential`. The panel-size dial is a per-invocation prose instruction, never a flag or config key, and the whole layer is optional to begin with:
 
 - **The default** - three axis draws, one merged fix pass, for a large or cross-cutting diff or one touching persisted or shared state, concurrency, security or data layout; a small diff in one area already gets one reviewer. The right shape when agent-written diffs get merged without a human reading them line by line.
 - **Single-reviewer economy** - `/flow-next:work fn-12 - use 1 reviewer instead of 3` collapses the round to one draw: the lean setting for small, clean diffs, where a three-draw harvest costs extra review passes for findings one draw would surface anyway.

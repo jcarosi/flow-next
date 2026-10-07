@@ -95,6 +95,14 @@ class FlowConfigSchema(unittest.TestCase):
             "run scripts/gen_flow_config_schema.py",
         )
 
+    def test_review_policies_have_strict_enums_and_defaults(self) -> None:
+        schema = json.loads(ARTIFACT.read_text(encoding="utf-8"))
+        review = schema["properties"]["review"]["properties"]
+        for key, default in (("fanoutExecution", "concurrent"), ("copilotDiffDelivery", "native")):
+            self.assertEqual(review[key]["type"], "string")
+            self.assertEqual(review[key]["enum"], list(flowctl.REVIEW_POLICY_VALUES[f"review.{key}"]))
+            self.assertEqual(review[key]["default"], default)
+
     def test_determinism(self) -> None:
         self.assertEqual(
             gen_flow_config_schema.render(),

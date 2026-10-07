@@ -251,8 +251,9 @@ small diff in one area gets one reviewer. The CLI backends (`codex`, `copilot`,
 `cursor`, `claude`) run that rule through one flowctl runner, whichever harness
 flow-next runs in; `host` applies it through the harness's own subagents. The three
 are draws of the same reviewer - same resolved backend/model, same base prompt, each
-differing by exactly one added axis line - dispatched concurrently, or back-to-back with
-the degradation disclosed on a host without one-message parallel dispatch:
+differing by exactly one added axis line - CLI draws run concurrently by default, or
+sequentially with `review.fanoutExecution=sequential`. A host without one-message parallel
+dispatch runs them back-to-back and discloses the degradation. The lenses are:
 correctness-and-logic of the changed code,
 contracts-and-consistency (do docs, tests, and stated promises agree with what the
 code does), and integration-with-unchanged-code. The studies behind this measured

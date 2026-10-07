@@ -16,8 +16,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from unittest import mock
@@ -295,6 +297,517 @@ class TestReviewFanout(unittest.TestCase):
         return code, payload, err
 
     # 1 -----------------------------------------------------------------
+
+    def _execution_policy(self, policy) -> None:
+        (self.root / ".flow" / "config.json").write_text(
+            json.dumps({"review": {"fanoutExecution": policy}}), encoding="utf-8",
+        )
+
+    def test_default_and_explicit_concurrent_overlap(self) -> None:
+        for policy in (None, "concurrent"):
+            with self.subTest(policy=policy):
+                if policy is not None:
+                    self._execution_policy(policy)
+                barrier = threading.Barrier(3, timeout=5)
+                calls = []
+                ship = self._ship_exec(calls)
+
+                def fake(*args, barrier=barrier, ship=ship, **kwargs):
+                    barrier.wait()
+                    return ship(*args, **kwargs)
+
+                code, out, err = self._run(
+                    "codex", "impl-review-fanout", "--base", "HEAD~1", "--json",
+                    fake=fake,
+                )
+                self.assertEqual(code, 0, out + err)
+                self.assertEqual(len(calls), 3)
+                self.assertFalse(self._payload(out)["failed_draws"])
+
+    def test_one_draw_and_valid_policy_writes(self) -> None:
+        for key, values in flowctl.REVIEW_POLICY_VALUES.items():
+            for value in values:
+                code, out, err = self._run("config", "set", key, value, "--json")
+                self.assertEqual(code, 0, out + err)
+                self.assertEqual(self._payload(out)["value"], value)
+        for policy in ("concurrent", "sequential"):
+            with self.subTest(policy=policy):
+                self._execution_policy(policy)
+                calls = []
+                code, out, err = self._run(
+                    "codex", "impl-review-fanout", "--base", "HEAD~1",
+                    "--draw", "correctness", "--json", fake=self._ship_exec(calls),
+                )
+                self.assertEqual(code, 0, out + err)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(self._payload(out)["draws"]), 1)
+                self.assertFalse(self._payload(out)["failed_draws"])
+
+    @contextlib.contextmanager
+    def _at_claim_age(self, receipt: Path, age_seconds: int):
+        claim = json.loads(receipt.read_text(encoding="utf-8"))["claim"]
+        started = datetime.fromisoformat(claim["timestamp"].replace("Z", "+00:00"))
+        with mock.patch.object(flowctl, "datetime", wraps=datetime) as clock:
+            clock.now.return_value = started + timedelta(seconds=age_seconds)
+            yield
+
+    def _claim_standalone(self, receipt: Path) -> str:
+        code, out, err = self._run(
+            "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+        )
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self._payload(out)["action"], "fanout")
+        return self._payload(out)["claim_token"]
+
+    def test_sequential_claim_covers_actual_panel_and_freezes_duration(self) -> None:
+        self._execution_policy("sequential")
+        receipt = self.root / "sequential-claim.json"
+        calls = []
+        ship = self._ship_exec(calls)
+        with mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            token = self._claim_standalone(receipt)
+
+            def fake(prompt, **kwargs):
+                data = json.loads(receipt.read_text(encoding="utf-8"))
+                # Later config and timeout changes cannot shorten this dispatch's claim.
+                self._execution_policy("concurrent")
+                with mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1),                         self._at_claim_age(receipt, 3000):
+                    code, out, err = self._run(
+                        "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+                    )
+                self.assertEqual(code, 0, out + err)
+                route = self._payload(out)
+                self.assertEqual(route["action"], "stop")
+                self.assertEqual(route["reason"], "claimed")
+                self.assertIsNone(route["rotated_to"])
+                self.assertEqual(data["claim"].get("ttl_seconds"), 6300)
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["claim"]["token"], token)
+                return ship(prompt, **kwargs)
+
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=fake,
+            )
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(calls), 3)
+        rid = self._payload(out)["rid"]
+        code, out, err = self._run(
+            "codex", "impl-review-fanout-finalize", "--rid", rid,
+            "--merged-file", str(self._write_merged(_empty_merged_review())), "--json",
+        )
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self._payload(out)["verdict"], "SHIP")
+        self.assertNotIn("claim", json.loads(receipt.read_text(encoding="utf-8")))
+        self.assertEqual(self._rounds(), 0)
+        self.assertEqual(self._pending(), 0)
+        self.assertFalse(self._attempts())
+
+    def test_delayed_sequential_dispatch_renews_full_budget_from_ownership(self) -> None:
+        self._execution_policy("sequential")
+        receipt = self.root / "delayed-sequential-claim.json"
+        calls = []
+        ship = self._ship_exec(calls)
+        routed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        dispatch_at = routed_at + timedelta(seconds=2600)
+        with mock.patch.object(flowctl, "datetime", wraps=datetime) as clock, \
+                mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            clock.now.return_value = routed_at
+            token = self._claim_standalone(receipt)
+            original = json.loads(receipt.read_text(encoding="utf-8"))
+            clock.now.return_value = dispatch_at
+            expected = {**original, "claim": {
+                **original["claim"], "timestamp": dispatch_at.isoformat().replace("+00:00", "Z"),
+                "ttl_seconds": 6300,
+            }}
+
+            def fake(prompt, **kwargs):
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), expected)
+                clock.now.return_value = dispatch_at + timedelta(seconds=1000 + len(calls) * 1800)
+                code, out, err = self._run(
+                    "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+                )
+                self.assertEqual(code, 0, out + err)
+                route = self._payload(out)
+                self.assertEqual((route["action"], route["reason"]), ("stop", "claimed"))
+                self.assertIsNone(route["rotated_to"])
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), expected)
+                return ship(prompt, **kwargs)
+
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=fake,
+            )
+            self.assertEqual(code, 0, out + err)
+            self.assertEqual(len(calls), 3)
+            clock.now.return_value = dispatch_at + timedelta(seconds=6299)
+            code, out, err = self._run(
+                "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+            )
+            self.assertEqual(code, 0, out + err)
+            self.assertEqual(self._payload(out)["reason"], "claimed")
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), expected)
+            clock.now.return_value = dispatch_at + timedelta(seconds=6300)
+            code, out, err = self._run(
+                "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+            )
+            self.assertEqual(code, 0, out + err)
+            route = self._payload(out)
+            self.assertEqual(route["action"], "fanout")
+            self.assertNotEqual(route["claim_token"], token)
+            self.assertEqual(json.loads(Path(route["rotated_to"]).read_text(encoding="utf-8")), expected)
+        self.assertEqual(self._rounds(), 0)
+        self.assertEqual(self._pending(), 0)
+        self.assertFalse(self._attempts())
+
+    def test_sequential_claim_expiring_at_ownership_lock_refuses_dispatch(self) -> None:
+        self._execution_policy("sequential")
+        receipt = self.root / "expired-at-ownership.json"
+        calls = []
+        routed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        original_lock = flowctl.cross_process_lock
+        with mock.patch.object(flowctl, "datetime", wraps=datetime) as clock, \
+                mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            clock.now.return_value = routed_at
+            self._claim_standalone(receipt)
+            clock.now.return_value = routed_at + timedelta(seconds=2699)
+
+            @contextlib.contextmanager
+            def delayed_lock(path):
+                with original_lock(path) as acquired:
+                    if path == flowctl._review_receipt_lock_path(receipt):
+                        clock.now.return_value = routed_at + timedelta(seconds=2700)
+                    yield acquired
+
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=self._ship_exec(calls),
+                extra_patches=(mock.patch.object(flowctl, "cross_process_lock", side_effect=delayed_lock),),
+            )
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("claim", out + err)
+        self.assertFalse(calls)
+        self.assertFalse(receipt.exists(), "failed dispatch releases only its own expired claim")
+        self.assertEqual(self._rounds(), 0)
+        self.assertEqual(self._pending(), 0)
+        self.assertFalse(self._attempts())
+
+    def test_sequential_claim_expired_before_token_capture_requires_new_route(self) -> None:
+        self._execution_policy("sequential")
+        receipt = self.root / "expired-before-capture.json"
+        calls = []
+        routed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with mock.patch.object(flowctl, "datetime", wraps=datetime) as clock, \
+                mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            clock.now.return_value = routed_at
+            token = self._claim_standalone(receipt)
+            original = receipt.read_bytes()
+            clock.now.return_value = routed_at + timedelta(seconds=2700)
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=self._ship_exec(calls),
+            )
+            self.assertEqual(code, 2, out + err)
+            self.assertFalse(calls)
+            self.assertEqual(receipt.read_bytes(), original)
+            code, out, err = self._run(
+                "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+            )
+            self.assertEqual(code, 0, out + err)
+            self.assertNotEqual(self._payload(out)["claim_token"], token)
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=self._ship_exec(calls),
+            )
+            self.assertEqual(code, 0, out + err)
+            self.assertEqual(len(calls), 3)
+        self.assertEqual(self._rounds(), 0)
+        self.assertEqual(self._pending(), 0)
+        self.assertFalse(self._attempts())
+
+    def test_sequential_claim_expires_at_aggregate_bound_and_preserves_new_owner(self) -> None:
+        self._execution_policy("sequential")
+        receipt = self.root / "expired-sequential-claim.json"
+        with mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            token = self._claim_standalone(receipt)
+            code, out, err = self._run(
+                "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                "--json", fake=self._ship_exec([]),
+            )
+            self.assertEqual(code, 0, out + err)
+            rid = self._payload(out)["rid"]
+            with self._at_claim_age(receipt, 6300):
+                code, out, err = self._run(
+                    "review-route", "--receipt", str(receipt), "--rotate-stale", "--json",
+                )
+        self.assertEqual(code, 0, out + err)
+        route = self._payload(out)
+        self.assertEqual(route["action"], "fanout")
+        self.assertNotEqual(route["claim_token"], token)
+        self.assertEqual(route["rotated_to"], str(receipt) + ".prev")
+        previous = json.loads(Path(route["rotated_to"]).read_text(encoding="utf-8"))
+        self.assertEqual(previous["claim"]["token"], token)
+        self.assertEqual(previous["claim"]["ttl_seconds"], 6300)
+        code, out, err = self._run(
+            "codex", "impl-review-fanout-finalize", "--rid", rid,
+            "--merged-file", str(self._write_merged(_empty_merged_review())), "--json",
+        )
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("no longer owned", out + err)
+        self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["claim"]["token"], route["claim_token"])
+        self.assertEqual(self._rounds(), 0)
+
+    def test_claim_duration_preserves_default_concurrent_and_one_draw(self) -> None:
+        cases = ((None, None, 1800, None), ("concurrent", None, 1800, None),
+                 ("sequential", ["correctness"], 1800, None),
+                 ("sequential", ["correctness", "integration"], 17, 934))
+        for index, (policy, axes, timeout, expected_ttl) in enumerate(cases):
+            with self.subTest(policy=policy, axes=axes):
+                config = self.root / ".flow/config.json"
+                if policy is None:
+                    config.unlink(missing_ok=True)
+                else:
+                    self._execution_policy(policy)
+                receipt = self.root / f"duration-{index}.json"
+                with mock.patch.object(flowctl, "get_review_exec_timeout", return_value=timeout):
+                    token = self._claim_standalone(receipt)
+                    original_claim = json.loads(receipt.read_text(encoding="utf-8"))["claim"]
+                    with self._at_claim_age(receipt, 100):
+                        code, out, err = self._run(
+                            "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                            "--json", *[item for axis in (axes or []) for item in ("--draw", axis)],
+                            fake=self._ship_exec([]),
+                        )
+                    self.assertEqual(code, 0, out + err)
+                    data = json.loads(receipt.read_text(encoding="utf-8"))
+                    self.assertEqual(data["claim"].get("ttl_seconds"), expected_ttl)
+                    self.assertEqual(data["claim"]["token"], token)
+                    if expected_ttl is None:
+                        self.assertEqual(data["claim"], original_claim)
+                    bound = expected_ttl or timeout + 900
+                    with self._at_claim_age(receipt, bound - 1):
+                        self.assertTrue(flowctl._review_route_claim_live(data))
+                    with self._at_claim_age(receipt, bound):
+                        self.assertFalse(flowctl._review_route_claim_live(data))
+
+    def test_claim_duration_refuses_lost_token_and_write_failure_before_exec(self) -> None:
+        self._execution_policy("sequential")
+        for failure in ("lost-token", "appeared-claim", "write-failed"):
+            with self.subTest(failure=failure):
+                receipt = self.root / f"{failure}.json"
+                token = None if failure == "appeared-claim" else self._claim_standalone(receipt)
+                calls = []
+                patches = []
+                replacement = []
+                if failure in ("lost-token", "appeared-claim"):
+                    original = flowctl._review_route_claim_token
+
+                    def replaced(path, original=original, receipt=receipt, replacement=replacement):
+                        captured = original(path)
+                        data = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {
+                            "type": "impl_review", "id": "branch",
+                            "claim": {"timestamp": flowctl.now_iso(), "pid": 1},
+                        }
+                        data["claim"]["token"] = "another-coordinator"
+                        receipt.write_text(json.dumps(data), encoding="utf-8")
+                        replacement.append(receipt.read_bytes())
+                        return captured
+
+                    patches.append(mock.patch.object(flowctl, "_review_route_claim_token", side_effect=replaced))
+                else:
+                    original_write = flowctl.atomic_write_json
+
+                    def failed_write(path, data, original_write=original_write, receipt=receipt):
+                        if path == receipt:
+                            raise OSError("claim TTL write failed")
+                        return original_write(path, data)
+
+                    patches.append(mock.patch.object(flowctl, "atomic_write_json", side_effect=failed_write))
+                code, out, err = self._run(
+                    "codex", "impl-review-fanout", "--base", "HEAD~1", "--receipt", str(receipt),
+                    "--json", fake=self._ship_exec(calls), extra_patches=tuple(patches),
+                )
+                self.assertEqual(code, 2, out + err)
+                self.assertIn("claim", out + err)
+                self.assertFalse(calls)
+                if failure in ("lost-token", "appeared-claim"):
+                    self.assertEqual(receipt.read_bytes(), replacement[0])
+                    self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["claim"]["token"], "another-coordinator")
+                    self.assertNotEqual(token, "another-coordinator")
+                else:
+                    self.assertFalse(receipt.exists(), "the dispatch releases only its own failed claim")
+                self.assertEqual(self._rounds(), 0)
+                self.assertEqual(self._pending(), 0)
+                self.assertFalse(self._attempts())
+
+    def test_sequential_order_includes_terminal_publication(self) -> None:
+        self._execution_policy("sequential")
+        axes = ["integration", "correctness", "contracts"]
+        calls = []
+        events = []
+        ship = self._ship_exec(calls)
+
+        def fake(prompt, **kwargs):
+            axis = _axis_of(prompt)
+            for previous in axes[:axes.index(axis)]:
+                sidecar = next((self.root / ".flow" / "review-fanout").iterdir())
+                self.assertTrue((sidecar / f"{previous}.json").is_file())
+                self.assertTrue((sidecar / f"{previous}.review.md").is_file())
+                self.assertIn(f"draw {previous}:", (sidecar / "progress.log").read_text())
+            events.append(("start", axis))
+            result = ship(prompt, **kwargs)
+            events.append(("finish", axis))
+            return result
+
+        code, out, err = self._run(
+            "codex", "impl-review-fanout", "--base", "HEAD~1", "--json",
+            *[item for axis in axes for item in ("--draw", axis)], fake=fake,
+        )
+        self.assertEqual(code, 0, out + err)
+        self.assertFalse(self._payload(out)["failed_draws"])
+        self.assertEqual(events, [(event, axis) for axis in axes for event in ("start", "finish")])
+        self.assertEqual([d["axis"] for d in self._payload(out)["draws"]], axes)
+
+    def test_sequential_reuses_lifecycle_contracts(self) -> None:
+        scenarios = (
+            "test_one_reservation_both_phases", "test_partial_fail_open",
+            "test_all_fail_single_refund", "test_draw_system_exit_is_contained",
+            "test_draws_receipt_schema", "test_round_2_prompt_contains_every_merged_ordinal",
+            "test_every_cli_backend_runs_the_same_panel",
+            "test_interrupted_dispatch_finalizes_completed_draw",
+            "test_interrupted_dispatch_without_draws_refunds_once",
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                case = TestReviewFanout(scenario)
+                case.setUp()
+                try:
+                    case._execution_policy("sequential")
+                    getattr(case, scenario)()
+                finally:
+                    case.doCleanups()
+
+    def test_review_policy_config_is_strict_before_reservation(self) -> None:
+        for key in ("fanoutExecution", "copilotDiffDelivery"):
+            for invalid in ("typo", "true", "Concurrent", "null", "1"):
+                with self.subTest(key=key, invalid=invalid):
+                    code, out, err = self._run("config", "set", f"review.{key}", invalid, "--json")
+                    self.assertNotEqual(code, 0, out + err)
+                    self.assertFalse((self.root / ".flow" / "config.json").exists())
+            for invalid in (None, False, 3, [], {}, "typo"):
+                with self.subTest(key=key, persisted=invalid):
+                    (self.root / ".flow" / "config.json").write_text(
+                        json.dumps({"review": {key: invalid}}), encoding="utf-8",
+                    )
+                    with mock.patch.object(flowctl, "enforce_and_increment_review_cap") as reserve:
+                        calls = []
+                        code, out, err = self._run(
+                            "codex", "impl-review-fanout", self.task_id,
+                            "--base", "HEAD~1", "--json", fake=self._ship_exec(calls),
+                        )
+                    self.assertEqual(code, 2, out + err)
+                    reserve.assert_not_called()
+                    self.assertFalse(calls)
+                    self.assertEqual(self._rounds(), 0)
+            with mock.patch.object(flowctl, "enforce_and_increment_review_cap") as reserve:
+                calls = []
+                code, out, err = self._run(
+                    "codex", "impl-review", self.task_id, "--base", "HEAD~1",
+                    "--json", fake=self._ship_exec(calls),
+                )
+                self.assertEqual(code, 2, out + err)
+                reserve.assert_not_called()
+                self.assertFalse(calls)
+            (self.root / ".flow" / "config.json").unlink()
+
+    def _interrupt_sequential_first_draw(self, *, first_has_verdict: bool) -> Path:
+        self._execution_policy("sequential")
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def fake(prompt, **kwargs):
+            axis = _axis_of(prompt)
+            calls.append(axis)
+            if axis == "correctness":
+                started.set()
+                if not release.wait(timeout=5):
+                    raise RuntimeError("coordinator did not release the active reviewer")
+                if not first_has_verdict:
+                    return "provider unavailable", "sess-correctness", 1, "provider unavailable"
+            return "<verdict>SHIP</verdict>", f"sess-{axis}", 0, ""
+
+        def interrupted_result(future, *args, **kwargs):
+            try:
+                self.assertTrue(started.wait(timeout=5), "the real first draw worker must be active")
+                self.assertTrue(future.running(), "interrupt must occur during the coordinator wait")
+            finally:
+                release.set()
+            raise KeyboardInterrupt("coordinator interrupted while first worker was active")
+
+        with mock.patch("concurrent.futures.Future.result", autospec=True, side_effect=interrupted_result):
+            with self.assertRaisesRegex(KeyboardInterrupt, "coordinator interrupted"):
+                self._dispatch(fake)
+        self.assertEqual(calls, ["correctness"], "later draws must never start after coordinator interruption")
+        self.assertEqual(self._pending(), 1)
+        self.assertEqual(self._rounds(), 1)
+        self.assertFalse(self._attempts())
+        (sidecar,) = (self.root / ".flow/review-fanout").iterdir()
+        first = json.loads((sidecar / "correctness.json").read_text(encoding="utf-8"))
+        self.assertEqual(first["verdict"], "SHIP" if first_has_verdict else None)
+        self.assertIn("draw correctness:", (sidecar / "progress.log").read_text(encoding="utf-8"))
+        for axis in ("contracts", "integration"):
+            self.assertFalse((sidecar / f"{axis}.json").exists())
+        aggregate = json.loads((sidecar / "meta.json").read_text(encoding="utf-8"))
+        self.assertTrue(all(row["verdict"] is None for row in aggregate["draws"]))
+        return sidecar
+
+    def test_sequential_coordinator_interrupt_preserves_completed_draw_recovery(self) -> None:
+        sidecar = self._interrupt_sequential_first_draw(first_has_verdict=True)
+        receipt = self.root / "recovered.json"
+        code, result, err = self._finalize(
+            sidecar.name, self._write_merged(_empty_merged_review()), "--receipt", str(receipt),
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(result["verdict"], "SHIP")
+        self.assertEqual(self._pending(), 0)
+        published = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(sum(row.get("verdict") == "SHIP" for row in published["draws"]), 1)
+        self.assertEqual(sum(bool(row.get("round_consumed")) for row in self._attempts()), 1)
+
+    def test_sequential_coordinator_interrupt_without_verdict_refunds_once(self) -> None:
+        sidecar = self._interrupt_sequential_first_draw(first_has_verdict=False)
+        merged = self._write_merged(_empty_merged_review())
+        for _ in range(2):
+            code, _, err = self._finalize(sidecar.name, merged)
+            self.assertEqual(code, 2, err)
+        self.assertEqual(self._pending(), 0)
+        self.assertEqual(self._rounds(), 0)
+        refunds = [row for row in self._attempts() if row.get("outcome") == "transport_failure"]
+        self.assertEqual(len(refunds), 1)
+
+    def test_sequential_reviewer_keyboard_interrupt_remains_a_contained_draw_failure(self) -> None:
+        self._execution_policy("sequential")
+        calls = []
+
+        def fake(prompt, **kwargs):
+            axis = _axis_of(prompt)
+            calls.append(axis)
+            if axis == "correctness":
+                raise KeyboardInterrupt("reviewer hook interrupted")
+            return "<verdict>SHIP</verdict>", f"sess-{axis}", 0, ""
+
+        code, panel, err = self._dispatch(fake)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(calls, list(flowctl.REVIEW_FANOUT_AXES))
+        first = panel["draws"][0]
+        self.assertEqual(first["failure_class"], "dispatch_exception")
+        self.assertIsNone(first["verdict"])
+        self.assertEqual(panel["failed_draws"], 1)
+        self.assertEqual(self._pending(), 1)
+        code, result, err = self._finalize(panel["rid"], self._write_merged(_empty_merged_review()))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(result["verdict"], "SHIP")
+        self.assertEqual(self._pending(), 0)
 
     def test_interrupted_dispatch_finalizes_completed_draw(self) -> None:
         sidecars = []

@@ -6,6 +6,16 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ## Unreleased
 
+### Added
+
+- **Run the first-round review panel one reviewer at a time.** Opt-in
+  `review.fanoutExecution=sequential` finishes each axis and its sidecars before
+  launching the next in supplied order. Concurrent scheduling remains the default,
+  and the panel still consumes one round with the same finalizer and receipts.
+- **Give shell-less Copilot reviews a readable frozen diff.** Opt-in
+  `review.copilotDiffDelivery=file` passes the exact reviewed git range by file path
+  for fresh and resumed primary reviews. Native delivery remains the default.
+
 ## [flow-next 8.1.1] - 2026-10-07
 
 Two tracker sync fixes: a Linear issue marked as a duplicate no longer breaks status sync, and a spec-only change from refine, capture or plan now reaches the linked issue when the event is set to `reconcile`.

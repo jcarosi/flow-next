@@ -249,6 +249,22 @@ class TestReviewRoute(unittest.TestCase):
         self.assertEqual(r["expired_reservation"], rid)
         self.assertIn("replayed and refunded", r["message"])
 
+    def test_claim_ttl_validates_positive_integer_and_preserves_legacy_fallback(self) -> None:
+        claim = {"type": "impl_review", "id": "branch", "claim": {"timestamp": "2026-01-01T00:00:00Z", "token": "t"}}
+        with mock.patch.object(flowctl, "get_review_exec_timeout", return_value=1800):
+            for invalid in (None, True, False, 0, -1, 6300.0, "6300", [], {}):
+                with self.subTest(ttl=invalid):
+                    claim["claim"]["ttl_seconds"] = invalid
+                    with mock.patch.object(flowctl, "_iso_age_seconds", return_value=2699):
+                        self.assertTrue(flowctl._review_route_claim_live(claim))
+                    with mock.patch.object(flowctl, "_iso_age_seconds", return_value=2700):
+                        self.assertFalse(flowctl._review_route_claim_live(claim))
+            claim["claim"]["ttl_seconds"] = 6300
+            with mock.patch.object(flowctl, "_iso_age_seconds", return_value=3000):
+                self.assertTrue(flowctl._review_route_claim_live(claim))
+            with mock.patch.object(flowctl, "_iso_age_seconds", return_value=6300):
+                self.assertFalse(flowctl._review_route_claim_live(claim))
+
     def test_standalone_claim_is_atomic(self) -> None:
         """Codex r45: the first standalone dispatch claims the scope
         atomically; a second coordinator on the same absent receipt stops."""

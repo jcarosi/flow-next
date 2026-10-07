@@ -1399,6 +1399,32 @@ def default_spec_tracker_state() -> dict:
     }
 
 
+REVIEW_POLICY_VALUES = {
+    "review.fanoutExecution": ("concurrent", "sequential"),
+    "review.copilotDiffDelivery": ("native", "file"),
+}
+
+
+def _review_config_enum(key: str) -> str:
+    """Read a strict review policy; hand-edited invalid values fail closed."""
+    value = get_config(key)
+    if not isinstance(value, str) or value not in REVIEW_POLICY_VALUES[key]:
+        raise ValueError(
+            f"Invalid {key} value {value!r}. Expected one of: "
+            + ", ".join(REVIEW_POLICY_VALUES[key])
+        )
+    return value
+
+
+def _validate_review_policies(args: argparse.Namespace) -> None:
+    """Freeze execution policy before reserving a round or launching a reviewer."""
+    try:
+        args.fanout_execution = _review_config_enum("review.fanoutExecution")
+        args.copilot_diff_delivery = _review_config_enum("review.copilotDiffDelivery")
+    except ValueError as exc:
+        error_exit(str(exc), use_json=getattr(args, "json", False), code=2)
+
+
 def get_default_config() -> dict:
     """Return default config structure."""
     return {
@@ -1416,7 +1442,10 @@ def get_default_config() -> dict:
         # land.* block, so `config get review.maxIterations` answers 8
         # rather than null on a fresh repo. In an autonomous run the config rung
         # may only lower the cap, so an autonomous agent cannot extend its own gate.
-        "review": {"backend": None, "maxIterations": DEFAULT_MAX_REVIEW_ITERATIONS},
+        "review": {
+            "backend": None, "maxIterations": DEFAULT_MAX_REVIEW_ITERATIONS,
+            "fanoutExecution": "concurrent", "copilotDiffDelivery": "native",
+        },
         "scouts": {"github": False},
         "tracker": get_default_tracker_config(),
         # flow-98 — the top-level `work.*` namespace is GONE. It held the
@@ -20131,6 +20160,14 @@ def cmd_config_set(args: argparse.Namespace) -> None:
     print_removed_config_keys_advisory()
 
     canonical_key, _ = resolve_config_key_for_write(args.key)
+
+    if canonical_key in REVIEW_POLICY_VALUES:
+        if not isinstance(args.value, str) or args.value not in REVIEW_POLICY_VALUES[canonical_key]:
+            error_exit(
+                f"Invalid {canonical_key} value {args.value!r}. Expected one of: "
+                + ", ".join(REVIEW_POLICY_VALUES[canonical_key]),
+                use_json=args.json, code=2,
+            )
 
     # fn-123 R5 - reject invalid host backend specs at WRITE time. The read-time
     # lenient parser treats a bad host spec as unset (loud, but late); accepting
@@ -43720,6 +43757,25 @@ def _copilot_run_exec(
     args: argparse.Namespace,
 ) -> tuple[str, Optional[str], int, str]:
     """Copilot spawn: session_id is always a UUID (marker-based create-or-resume)."""
+    review_range = getattr(args, "claude_range", None)
+    delivery = None
+    if review_range is not None:
+        delivery = getattr(args, "copilot_diff_delivery", None)
+        if delivery is None:
+            delivery = _review_config_enum("review.copilotDiffDelivery")
+    if delivery == "file":
+        base, head, receipt_id = review_range
+        try:
+            diff_path = _claude_materialise_review_diff(repo_root, receipt_id, base, head)
+        except (ClaudeReviewDiffError, OSError) as exc:
+            return "", (session_id or ""), 2, f"copilot review diff: {exc}"
+        prompt += (
+            "\n\n## Diff delivery (copilot backend)\n\n"
+            "This session has no shell: use file tools to read the complete "
+            f"frozen diff for `{base}..{head}` at `{diff_path}` instead of "
+            "running git. Read it yourself; do not delegate this review. Repository "
+            "files remain readable at their normal paths.\n"
+        )
     managed = _managed_review_exec(
         prompt, backend="copilot", session_id=session_id, repo_root=repo_root, spec=spec,
         resolution_out=resolution_out, args=args,
@@ -44545,6 +44601,7 @@ def cmd_backend_review(
     from ``args.review_backend`` / ``args.review_kind`` (parameterized argparse).
     Supports impl / plan / completion kinds.
     """
+    _validate_review_policies(args)
     if getattr(args, "require_managed_execution", False):
         try:
             require_execution_provider_configuration()
@@ -44632,8 +44689,8 @@ def _dispatch_backend_review(
     # fn-221: this helper IS the primary-dispatch boundary (impl / plan /
     # completion; ``_dispatch_session_pass`` never comes through here), so the
     # reviewed range travels to the adapter on ``args`` - consumed by
-    # ``_claude_run_exec``, which delivers the diff by path; every other
-    # adapter ignores it. Never derived from the current HEAD downstream.
+    # ``_claude_run_exec`` and opt-in Copilot file delivery. Other adapters
+    # ignore it. Never derived from the current HEAD downstream.
     if reviewed_base_sha and reviewed_head_sha:
         receipt_id = (
             Path(receipt_path).stem if receipt_path
@@ -46361,7 +46418,7 @@ def _review_fanout_run_draw(
     args = argparse.Namespace(**vars(args))
     args.managed_review_request_scope = f"{sidecar_dir.name}:{axis}"
     if getattr(args, "claude_range", None):
-        # One diff file per draw: a claude reviewer may hold it open.
+        # One diff file per draw: a file-tools reviewer may hold it open.
         base_sha, head_sha, rid = args.claude_range
         args.claude_range = (base_sha, head_sha, f"{rid}-{axis}")
     spec = draw["spec"]
@@ -46479,7 +46536,22 @@ def _review_fanout_run_draw(
 def _review_fanout_dispatch(draws, prompts, repo_root, args, sidecar_dir):
     from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(max_workers=len(draws)) as pool:
+    execution = getattr(args, "fanout_execution", None)
+    if execution is None:
+        execution = _review_config_enum("review.fanoutExecution")
+    max_workers = 1 if execution == "sequential" else len(draws)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        if execution == "sequential":
+            # Await each worker before submitting the next: coordinator interruption
+            # must not leave queued reviewers for executor shutdown to launch.
+            results = []
+            for draw in draws:
+                future = pool.submit(
+                    _review_fanout_run_draw,
+                    draw, prompts[draw["axis"]], repo_root, args, sidecar_dir,
+                )
+                results.append(future.result())
+            return results
         futs = [
             pool.submit(
                 _review_fanout_run_draw,
@@ -46922,7 +46994,38 @@ def _review_route_claim_live(receipt: Optional[dict]) -> bool:
     if not isinstance(claim, dict):
         return False
     age = _iso_age_seconds(claim.get("timestamp"))
-    return age is None or age < get_review_exec_timeout() + 900
+    ttl = claim.get("ttl_seconds")
+    if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl <= 0:
+        ttl = get_review_exec_timeout() + 900
+    return age is None or age < ttl
+
+
+def _review_route_claim_renew(receipt_path: Optional[str], token: Optional[str], ttl_seconds: int) -> bool:
+    """Renew a live owned claim, or confirm an unclaimed dispatch, under the receipt lock."""
+    if not receipt_path:
+        return token is None
+    path = Path(receipt_path)
+    try:
+        with cross_process_lock(_review_receipt_lock_path(path)):
+            data = _review_route_read_receipt(path) if path.exists() else None
+            if token is None:
+                # No captured owner can renew a placeholder, including one that
+                # expired before token capture or appeared while waiting for the lock.
+                return not (
+                    isinstance(data, dict) and "verdict" not in data
+                    and isinstance(data.get("claim"), dict)
+                )
+            if not _review_route_claim_live(data):
+                return False
+            claim = data.get("claim")
+            if not isinstance(claim, dict) or claim.get("token") != token:
+                return False
+            claim["timestamp"] = now_iso()
+            claim["ttl_seconds"] = ttl_seconds
+            atomic_write_json(path, data)
+        return True
+    except (OSError, CrossProcessLockError):
+        return False
 
 
 def _review_route_claim(path: Path, scope_id: str) -> Optional[str]:
@@ -47470,6 +47573,7 @@ def _review_fanout_default_receipt(args, task_id: Optional[str]) -> None:
 def _impl_review_fanout(args: argparse.Namespace) -> None:
     import secrets
 
+    _validate_review_policies(args)
     _wire_backend_review_hooks()
     args.base = args.base or _default_review_base(args.json)
     task_id, standalone, flow_dir, task_spec_path = _review_fanout_resolve_scope(args)
@@ -47500,6 +47604,16 @@ def _impl_review_fanout(args: argparse.Namespace) -> None:
             use_json=args.json,
             code=2,
         )
+    claim_token = getattr(args, "_claim_token", None)
+    if standalone and args.fanout_execution == "sequential" and len(draws) > 1:
+        ttl_seconds = len(draws) * get_review_exec_timeout() + 900
+        if not _review_route_claim_renew(args.receipt, claim_token, ttl_seconds):
+            error_exit(
+                "fan-out: could not renew the sequential scope claim "
+                "(claim expired, ownership changed or its write failed); no reviewers were "
+                "launched. Re-run review-route before dispatching.",
+                use_json=args.json, code=2,
+            )
     base_branch = args.base
     try:
         reviewed_base_sha, reviewed_head_sha = _capture_review_snapshot(base_branch)
@@ -54264,7 +54378,8 @@ def _add_impl_review_fanout_parsers(sub, backend: str) -> None:
     p = sub.add_parser(
         "impl-review-fanout",
         help=(
-            "Phase one: reserve once, dispatch concurrent axis-lens draws, "
+            "Phase one: reserve once, dispatch axis-lens draws concurrently "
+            "by default or sequentially via review.fanoutExecution, "
             "persist sidecars without finalizing (fn-215). Optional "
             "deep/validate/walkthrough passes run once against the MERGED "
             "container after finalize, before the fix pass."

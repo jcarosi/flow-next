@@ -33,10 +33,13 @@ The first round dispatches one reviewer draw or three, by the panel rule in
 `contracts`, `integration`), each differing from the base prompt by exactly one
 added axis line, on the same resolved backend/model the single dispatch uses; one
 draw runs the correctness lens. The fan-out is TWO blocking foreground flowctl
-invocations with your merge between them; this is the first.
+invocations with your merge between them; this is the first. Apply the foreground duration
+rule in [SKILL.md](SKILL.md) before dispatch. `review.fanoutExecution` defaults to
+`concurrent`; opt-in `sequential` completes each draw before starting the next.
 
 ```bash
-# FOREGROUND RULE: run this as ONE blocking foreground Bash call (timeout 600s).
+# FOREGROUND RULE: one blocking foreground Bash call; concurrent timeout 600s.
+# Sequential fan-out uses the duration rule above; stop if the host cannot supervise it.
 # NEVER run_in_background + monitor - a background completion does not resume a subagent context.
 # ROUTE: ONE deterministic verb owns canonicalization (fn-N.M ->
 # fn-N-slug.M), the repo/scope-keyed receipt path (explicit REVIEW_RECEIPT_PATH
@@ -87,8 +90,10 @@ What the dispatch does (facts you rely on, not steps you take):
 
 - Task mode reserves exactly **ONE** review round for the whole fan-out
   (standalone reserves none; a per-invocation nonce serves as the `rid`).
-- The draws run concurrently, each under its own timeout — a hung draw
-  cannot hold the round to the wall-clock bound.
+- Draws run concurrently by default, each under its own timeout. With
+  `review.fanoutExecution=sequential`, each draw completes its terminal sidecars
+  and progress before the next starts, in supplied axis order. Failed draws
+  complete and remain recorded before the next starts; there are no draw retries.
 - Per-draw sidecars land at `.flow/review-fanout/<rid>/`: `<axis>.review.md`
   (the extracted reviewer message — what you merge), `<axis>.json` (metadata
   incl. verdict/session), `<axis>.out.txt` (raw), `meta.json`, `progress.log`.
