@@ -55,7 +55,8 @@ echo "Review backend: $BACKEND (override: --review=codex|copilot|cursor|claude|h
 **Spec-form env var (optional):** `FLOW_REVIEW_BACKEND` accepts bare or full spec:
 
 ```bash
-# FOREGROUND RULE: run this as ONE blocking foreground Bash call (timeout 600s).
+# FOREGROUND RULE: one blocking foreground Bash call (single review timeout 600s).
+# For sequential fan-out follow SKILL.md's summed foreground duration rule.
 # NEVER run_in_background + monitor - a background completion does not resume a subagent context.
 # Bare backend (back-compat)
 FLOW_REVIEW_BACKEND=codex $FLOWCTL codex impl-review "$TASK_ID" --receipt "$RECEIPT_PATH"

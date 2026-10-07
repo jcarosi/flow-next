@@ -1288,6 +1288,8 @@ flowctl config set memory.enabled false [--json]
 | `planSync.crossSpec` | bool | `false` | Cross-spec plan-sync - scan other open specs for stale references after each task (opt-in; increases sync time)* |
 | `scouts.github` | bool | `false` | Enable github-scout during planning (requires gh CLI) |
 | `review.backend` | string | `null` | Default review backend (`codex`, `copilot`, `cursor`, `claude`, `host`, `none`), or spec form (`codex:<model>:<effort>`, `claude:<model>:<effort>` with efforts `low`/`medium`/`high`/`xhigh`/`max`, `cursor:<model>` - cursor folds effort into the model, no `:effort` rung). If unset, review commands require `--review` or `FLOW_REVIEW_BACKEND`. A stale `rp` or `export` value prints a notice and review reads as not configured; `config set` rejects it. |
+| `review.fanoutExecution` | string | `concurrent` | First-round CLI review scheduling. `concurrent` overlaps draws; `sequential` completes each draw, including terminal sidecars and progress, before starting the next in supplied axis order. One round covers the panel; re-review stays single. Invalid writes or persisted values fail before reservation or dispatch. |
+| `review.copilotDiffDelivery` | string | `native` | Copilot primary evidence delivery. `native` preserves existing prompts; opt-in `file` delivers the frozen reviewed range through a readable diff path and file-tools instruction. Applies to fresh and resumed primary reviews; optional deep/validator passes retain prior evidence. Invalid values fail before reservation or dispatch. |
 | `review.maxIterations` | int | `8` | Cumulative review-round cap per scope. **Precedence: env `MAX_REVIEW_ITERATIONS` > this key > 8.** Minimum 1 on **both** rungs, and the cap can never be disabled: an invalid config value falls back to 8, and a **present-but-invalid** env value also stops at 8 rather than handing control to the config value it was overriding (only an absent or empty env var proceeds to the config rung). This is the knob to reach for when a review loop costs more than it is worth: **lower the cap, never re-add trend-based stall inference** (see the fn-168 decision record). Raising it is a **human** act, enforced in the consumer rather than only at the guard: in an autonomous run (`flow --auto`) this key may only **lower** the cap, never raise it - whatever wrote the file and however it was written - so a bigger number cannot extend an agent's own gate. Lowering stays honored, since that is the intended knob. |
 | `tracker.enabled` | bool | `false` | Enable the tracker-sync bridge (see [`flowctl sync`](#flowctl-sync)). The bridge is active iff raw `tracker.enabled == true` OR raw `tracker.type ∈ {linear, github, gitlab, jira}`. |
 | `tracker.type` | string | `null` | Tracker backend: `linear`, `github`, `gitlab`, or `jira`. |
@@ -2438,8 +2440,17 @@ and failure rules.
 **First-round fan-out - two coordinator-visible invocations, the same on every CLI
 backend (`codex`, `copilot`, `cursor`, `claude`):**
 
+Draws run concurrently by default. To finish one reviewer before starting the next, use
+`flowctl config set review.fanoutExecution sequential`. The scheduler preserves supplied
+axis order, including the default correctness, contracts, integration order, and completes
+each draw's terminal sidecars and progress before the next launch. Failure handling,
+backend/model/effort resolution, one-round accounting and finalization stay the same.
+Re-review remains one reviewer. A sequential foreground call needs at least the actual
+draw count times the effective `FLOW_REVIEW_EXEC_TIMEOUT` (default 1800 seconds), plus
+coordinator overhead. A host unable to supervise that duration must stop before dispatch.
+
 ```bash
-# Phase one - reserve ONE round, dispatch the axis draws concurrently, finalize nothing
+# Phase one - reserve ONE round, dispatch the axis draws, finalize nothing
 flowctl <backend> impl-review-fanout <task-id> [--base <branch>] [--draw AXIS[=BACKEND[:MODEL[:EFFORT]]]]... [--receipt <path>] [--json]
 # Default draws: correctness, contracts, integration on the resolved backend spec.
 # Explicit --draw args override (1-3 draws): a single `--draw correctness` is the
@@ -2501,7 +2512,13 @@ dispatch captures the token it started under; a dispatch that dies before any
 receipt replaces the claim (all draws failed, snapshot or sidecar errors) and a
 finalize that refuses the round as stale release it, ownership-bound under the
 receipt lock - a replacement claim or a published receipt at the same path is
-never removed. A claim expires on the review liveness bound.
+never removed. Before a claimed standalone sequential panel with multiple draws launches,
+the dispatch freezes its claim lifetime to the actual draw count times the effective
+per-reviewer timeout, plus 900 seconds for coordinator work. The update holds the receipt
+lock and requires the captured owner token; ownership or write failure stops before any
+reviewer launches. Later configuration changes do not shorten that claim. Concurrent,
+one-draw and legacy claims retain the per-reviewer timeout plus 900-second lifetime;
+expired claims remain recoverable through `review-route --rotate-stale`.
 
 Scope ownership through the optional phases: `impl-review-fanout-finalize
 --hold-for-phases N` (CLI backends; acquired BEFORE the record, while the
@@ -2720,6 +2737,15 @@ flowctl copilot deep-pass --pass adversarial|security|performance \
 ```
 
 Spec form: `copilot[:model[:effort]]`. Default model resolved via env (`FLOW_COPILOT_MODEL`) / config / registry. Receipt fields mirror codex: `mode: "copilot"`, `session_id` for resume.
+
+**Frozen diff by file (opt-in).** `flowctl config set review.copilotDiffDelivery file`
+materializes the exact reviewed base/head range for primary implementation, plan and
+completion reviews, including resumed reviews and each fan-out draw. Files use the existing
+`.flow/tmp/claude-review/<receipt-id>-<base7>-<head7>.diff` layout and atomic path/symlink
+guards. The prompt names the file and instructs Copilot to use file tools; it never embeds
+the diff. Materialization failure stops before CLI or managed dispatch. Deep and validator
+passes retain the primary session's evidence. The default `native` preserves existing
+Copilot transport; Claude file delivery is unchanged.
 
 ### cursor
 

@@ -56,8 +56,14 @@ integration. The re-review after fixes runs one reviewer. You make the call; flo
 ## 2. CLI review
 
 For `codex`, `claude`, `copilot` and `cursor`. Run each review command as one blocking foreground
-Bash call with a 600-second timeout. Never run it in the background: its completion would not
-resume you.
+Bash call. Concurrent dispatch keeps the 600-second outer timeout. Before sequential
+fan-out (`flowctl config get review.fanoutExecution` returns `sequential`), size the outer
+foreground timeout to at least the actual number of draws times the effective per-reviewer
+bound (`FLOW_REVIEW_EXEC_TIMEOUT`, default 1800 seconds), plus coordinator margin. An empty,
+invalid or nonpositive override uses 1800. Count explicit `--draw` arguments, or the default
+three draws; the one-reviewer panel counts as one. If the host cannot supervise that duration,
+stop before dispatch and report the limit. Never run it in the background; its completion
+would not resume you.
 
 ```bash
 FLOWCTL="${CODEX_HOME:-$HOME/.codex}/scripts/flowctl"
