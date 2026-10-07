@@ -85,6 +85,19 @@ class FreshPolicyResolution(unittest.TestCase):
             with self.assertRaises(ValueError):
                 flowctl._resolve_re_review_session(None)
 
+    def test_invalid_user_policy_still_blocks_cli_dispatch(self):
+        with _flow_repo() as (repo, base), mock.patch.dict(
+            os.environ, {"FLOW_RE_REVIEW_SESSION": "invalid"}
+        ):
+            receipt = repo / "receipt.json"
+            code, out, err = _run_cli(
+                "copilot", "impl-review", TASK_ID, "--base", base,
+                "--receipt", str(receipt), "--spec", "copilot:qwen-l40s:medium", "--json",
+            )
+            self.assertEqual(code, 2)
+            self.assertIn("FLOW_RE_REVIEW_SESSION", out + err)
+            self.assertFalse(receipt.exists())
+
     def test_user_override_does_not_mask_invalid_review_object(self):
         with _flow_repo() as (repo, _base), mock.patch.dict(
             os.environ, {"FLOW_RE_REVIEW_SESSION": "fresh"}

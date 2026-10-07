@@ -47668,23 +47668,17 @@ def cmd_review_route(args: argparse.Namespace) -> None:
         else:
             print(f"PHASE_LEASE={payload['phase_lease']}")
         return
-    try:
-        re_review_session = _resolve_re_review_session(None)
-    except ValueError as exc:
-        error_exit(str(exc), use_json=args.json, code=2)
     result = compute_review_route(
         flow_dir, repo_root, task_id,
         receipt_path=getattr(args, "receipt", None),
         rotate_stale=bool(getattr(args, "rotate_stale", False)),
         force=bool(getattr(args, "force", False)),
     )
-    result["re_review_session"] = re_review_session
     if args.json:
         json_output(result)
         return
     print(f"ACTION={result['action']} ({result['reason']})")
     print(f"RECEIPT_PATH={result['receipt_path']}")
-    print(f"RE_REVIEW_SESSION={result['re_review_session']}")
     if result["task_id"]:
         print(f"TASK_ID={result['task_id']}")
     print(result["message"], file=sys.stderr if result["action"] == "stop" else sys.stdout)
