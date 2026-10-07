@@ -6,7 +6,7 @@ Use when `BACKEND` is `codex`, `claude`, `copilot` or `cursor`. Prerequisite: Ph
 
 1. Use the `$FLOWCTL $BACKEND` review commands exclusively — never call the reviewer CLI directly
 2. **The FIRST review round of a scope is the two-phase fan-out**: `impl-review-fanout` (dispatch), your merge, `impl-review-fanout-finalize` (finalize), sized by the panel rule in [SKILL.md](SKILL.md). Re-review rounds after fixes are a single `impl-review` with `--receipt`
-3. Pass `--receipt` throughout — the finalize writes the merged receipt; re-reviews resume from it
+3. Pass `--receipt` throughout — the finalize writes the merged receipt; re-reviews read its findings and session policy
 4. Parse verdict from command output
 
 ## Step 1: Identify Task and Diff Base
@@ -126,8 +126,8 @@ reads prose. Worked phrasings:
 Enforced constraint (flowctl, not convention): the **primary draw
 (`correctness` — or, when `correctness` isn't drawn, the first draw) must run
 on `$BACKEND`**, the backend whose command runs the fan-out — the finalize stamps
-the merged receipt's top-level session/model from it and round 2+ resumes that
-session through `$FLOWCTL $BACKEND impl-review`, so a primary on another backend
+the merged receipt's top-level session/model from it and round 2+ uses that
+backend through `$FLOWCTL $BACKEND impl-review`, so a primary on another backend
 is refused with exit 2. The other draws may name any CLI backend.
 
 ## Step 3: Coordinator merge (judgment — yours)
@@ -296,10 +296,13 @@ args+=(--base "$DIFF_BASE" --receipt "$RECEIPT_PATH")
 $FLOWCTL "$BACKEND" impl-review "${args[@]}"
 ```
 
-   When the receipt carries `draws[]`, flowctl resumes the primary session and
-   injects the FULL merged prior-finding container into the dispatch prompt
-   (every merged ordinal present): the resumed session did not author the
-   other axes' findings. Automatic — no flag.
+   `review.reReviewSession` controls session continuity. `resume` (the built-in
+   default) continues the primary session. `fresh` starts exactly one new
+   reviewer session for this re-review. Both policies inject the FULL merged
+   prior-finding container (every merged ordinal) after a panel. A fresh
+   session receives the full container after any earlier review round.
+   `--re-review-session resume|fresh` overrides the project and user policy
+   for this one dispatch.
 5. The re-review's verdict is terminal ([other-paths.md](other-paths.md) § Fix Loop) unless working-rules.md's review loop applies (an unattended run, or a request to review until SHIP): never start a second fix pass; surface surviving findings to the caller.
 
 **Output includes `VERDICT=SHIP|NEEDS_WORK|MAJOR_RETHINK|NEEDS_HUMAN`.**
@@ -315,9 +318,11 @@ fan-out provenance persists in the receipt history and in the
 `.flow/review-fanout/<rid>/` sidecar's `meta.json` alongside the per-draw raw
 outputs, for audit.
 
-Session resume guard: a re-review resumes the session only when the receipt's
-`mode` is this backend; a cross-backend switch (another backend's receipt at the
-same path) starts a fresh session.
+Session policy: `resume` continues a session only when the receipt's `mode` is
+this backend. `fresh` starts a new session while retaining the receipt's finding
+lineage, reviewed range, model and effort. The new receipt records
+`previous_session_id` and `re_review_session: fresh` when a fresh re-review
+delivers a verdict. A cross-backend receipt does not resume.
 
 ## Backend notes
 
@@ -349,7 +354,7 @@ Grammar and defaults: [references/backend-specs.md](references/backend-specs.md)
 - **Inventing a `--model`/`--effort` CLI flag** - Use `--spec` or the backend's env vars
 - **Widening the reviewer's tools or sandbox** - Reviewers are read-only by contract
 - **Fabricating a first-call resume id** - The first call starts fresh; resume uses the session the receipt recorded
-- **Fanning out on round 2+** - First round only; the guard refuses a receipt with prior findings, and re-reviews resume the primary session
+- **Fanning out on round 2+** - First round only; the guard refuses a receipt with prior findings, and re-reviews use one reviewer under the resolved session policy
 - **Axis provenance on finding items** - It lives in your merge prose; the findings schema's allowlist is closed
 - **Retrying a failed draw** - Partial fan-out fails open; a failed draw never blocks, retries, or consumes extra rounds
 - **Skipping the finalize** - The dispatch records nothing; a merge without `impl-review-fanout-finalize` leaves a charged round that the refund-intent journal will refund as a transport failure

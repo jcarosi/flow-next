@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -16,6 +17,17 @@ from test_claude_review_commands import (
 )
 
 import flowctl
+
+
+def setUpModule():
+    # Delivery tests exercise native/file transport with stock session resume.
+    global _stock_session_policy
+    _stock_session_policy = mock.patch.dict(os.environ, {"FLOW_RE_REVIEW_SESSION": "resume"})
+    _stock_session_policy.start()
+
+
+def tearDownModule():
+    _stock_session_policy.stop()
 
 SID = "11111111-2222-3333-4444-555555555555"
 REVIEW = "Reviewed frozen evidence.\n<verdict>NEEDS_WORK</verdict>\n"

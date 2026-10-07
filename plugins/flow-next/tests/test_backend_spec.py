@@ -1603,7 +1603,9 @@ class NoEmbedRegression(unittest.TestCase):
         },
         "build_rereview_preamble": {
             "changed_files", "review_type", "prior_findings", "prior_items",
-            "resumed",
+            # Selects independent-session wording and full prior-item rendering;
+            # no new diff/spec payload is supplied to the builder.
+            "resumed", "fresh_session",
         },
     }
 

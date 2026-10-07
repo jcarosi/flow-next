@@ -96,6 +96,14 @@ DESCRIPTIONS: dict[str, str] = {
         "Applies to fresh and resumed primary reviews; optional session passes "
         "retain their prior evidence. Invalid values are rejected."
     ),
+    "review.reReviewSession": (
+        "CLI re-review session policy: resume (built-in default) continues the "
+        "previous reviewer conversation; fresh starts one independent reviewer "
+        "session after fixes and supplies the full prior-finding container. "
+        "An explicit project value overrides FLOW_RE_REVIEW_SESSION, which can "
+        "set a user default. --re-review-session overrides both for one review. "
+        "First-round fan-out and host review are unchanged."
+    ),
     "review.maxIterations": (
         "Cumulative review-round cap per scope (default 8, minimum 1 - the cap "
         "can never be disabled). The env var MAX_REVIEW_ITERATIONS takes "
@@ -501,6 +509,7 @@ def _build_table() -> list[tuple[str, dict]]:
         ("review.backend", _review_backend_fragment()),
         ("review.fanoutExecution", {"type": "string", "enum": list(flowctl.REVIEW_POLICY_VALUES["review.fanoutExecution"])}),
         ("review.copilotDiffDelivery", {"type": "string", "enum": list(flowctl.REVIEW_POLICY_VALUES["review.copilotDiffDelivery"])}),
+        ("review.reReviewSession", {"type": "string", "enum": list(flowctl.REVIEW_POLICY_VALUES["review.reReviewSession"])}),
         ("review.maxIterations", {"type": "integer", "minimum": 1}),
         ("scouts", {"kind": "object", "open": False}),
         ("scouts.github", {"type": "boolean"}),

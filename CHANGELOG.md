@@ -8,6 +8,12 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ### Added
 
+- **Choose independent CLI re-reviews when needed.** `review.reReviewSession=fresh`
+  starts one new Codex, Copilot, Cursor or Claude reviewer session after each fix,
+  carrying the full prior findings and preserving the review route and receipt
+  lineage. `resume` remains the built-in default. `FLOW_RE_REVIEW_SESSION` sets
+  a user default across projects; an explicit project setting or one-call
+  `--re-review-session` takes precedence. First-round panels are unchanged.
 - **Run the first-round review panel one reviewer at a time.** Opt-in
   `review.fanoutExecution=sequential` finishes each axis and its sidecars before
   launching the next in supplied order. Concurrent scheduling remains the default,

@@ -1402,6 +1402,7 @@ def default_spec_tracker_state() -> dict:
 REVIEW_POLICY_VALUES = {
     "review.fanoutExecution": ("concurrent", "sequential"),
     "review.copilotDiffDelivery": ("native", "file"),
+    "review.reReviewSession": ("resume", "fresh"),
 }
 
 
@@ -1416,11 +1417,42 @@ def _review_config_enum(key: str) -> str:
     return value
 
 
+def _resolve_re_review_session(invocation: Optional[str]) -> str:
+    """Resolve CLI re-review sessions without hiding an explicit project key.
+
+    Invocation > persisted project key > user environment > software default.
+    The raw-project probe is necessary because ``get_config`` has already
+    merged the built-in ``resume`` default over missing project keys.
+    """
+    if invocation is not None:
+        value = invocation
+        source = "--re-review-session"
+    else:
+        project = _get_config_from_file("review.reReviewSession")
+        if project is not _CONFIG_RAW_SENTINEL:
+            value = project
+            source = "review.reReviewSession"
+        else:
+            environment = os.environ.get("FLOW_RE_REVIEW_SESSION", "")
+            value = environment if environment else "resume"
+            source = "FLOW_RE_REVIEW_SESSION" if environment else "built-in default"
+    if not isinstance(value, str) or value not in REVIEW_POLICY_VALUES["review.reReviewSession"]:
+        raise ValueError(
+            f"Invalid {source} value {value!r}. Expected one of: "
+            + ", ".join(REVIEW_POLICY_VALUES["review.reReviewSession"])
+        )
+    return value
+
+
 def _validate_review_policies(args: argparse.Namespace) -> None:
     """Freeze execution policy before reserving a round or launching a reviewer."""
     try:
         args.fanout_execution = _review_config_enum("review.fanoutExecution")
         args.copilot_diff_delivery = _review_config_enum("review.copilotDiffDelivery")
+        if getattr(args, "review_kind", None) in ("impl", "plan", "completion"):
+            args.re_review_session = _resolve_re_review_session(
+                getattr(args, "re_review_session", None)
+            )
     except ValueError as exc:
         error_exit(str(exc), use_json=getattr(args, "json", False), code=2)
 
@@ -1445,6 +1477,7 @@ def get_default_config() -> dict:
         "review": {
             "backend": None, "maxIterations": DEFAULT_MAX_REVIEW_ITERATIONS,
             "fanoutExecution": "concurrent", "copilotDiffDelivery": "native",
+            "reReviewSession": "resume",
         },
         "scouts": {"github": False},
         "tracker": get_default_tracker_config(),
@@ -1527,7 +1560,7 @@ def get_default_config() -> dict:
 # MERGED defaults still apply (see get_default_config / get_default_tracker_config).
 # fn-134.2: tracker.specIds — see get_default_tracker_config comment for the
 # materialization decision (DO NOT materialize; unset must be detectable).
-_INIT_UNMATERIALIZED_LEAVES = ("tracker.specIds",)
+_INIT_UNMATERIALIZED_LEAVES = ("tracker.specIds", "review.reReviewSession")
 # fn-138.3 (R3): stable published URL of the flow-config JSON Schema, stamped
 # as "$schema" into configs cmd_init scaffolds/refreshes so editors validate
 # and autocomplete .flow/config.json. Latest-mutable (not versioned). Inert to
@@ -1743,6 +1776,15 @@ def load_config_snapshot() -> ConfigSnapshot:
         merged = defaults
     else:
         merged = deep_merge(defaults, raw)
+    # This is a user policy, so an absent project key inherits the user's
+    # environment without changing the raw project file or software default.
+    if (
+        isinstance(merged.get("review"), dict)
+        and _tree_probe(raw or {}, "review.reReviewSession") is _CONFIG_RAW_SENTINEL
+    ):
+        environment = os.environ.get("FLOW_RE_REVIEW_SESSION", "")
+        if environment:
+            merged["review"]["reReviewSession"] = environment
     return ConfigSnapshot(raw, _with_tracker_spec_ids_normalized(merged))
 
 
@@ -1936,7 +1978,7 @@ def _set_config_locked(flow_dir: Path, key: str, value) -> dict:
     except ValueError as exc:
         error_exit(str(exc), code=2)
     if config is None:
-        config = get_default_config()
+        config = _init_persisted_defaults()
 
     # Navigate/create nested path
     parts = key.split(".")
@@ -12250,6 +12292,7 @@ def build_convergence_ratchet_block(
     scaffold_only: bool = False,
     review_type: str = "implementation",
     resumed: bool = False,
+    full_items: bool = False,
 ) -> str:
     """fn-90 R4: the shrink-only convergence contract for re-reviews.
 
@@ -12363,6 +12406,13 @@ expand scope.
             rendered_item = _render_structured_prior_finding(item)
             if rendered_item is None:
                 return ""
+            if full_items:
+                # A new reviewer has none of the preceding conversation. Give
+                # it every validated field, including body/evidence and R-IDs,
+                # while retaining the ordinal line the reply grammar uses.
+                rendered_item += "\n" + _neutralize_prior_findings_text(
+                    json.dumps(item, ensure_ascii=False, sort_keys=True)
+                )
             rendered.append(rendered_item)
         prior = "\n".join(rendered)
     else:
@@ -12380,6 +12430,7 @@ def build_rereview_preamble(
     prior_findings: Optional[str] = None,
     prior_items: Optional[list[dict]] = None,
     resumed: bool = False,
+    fresh_session: bool = False,
 ) -> str:
     """Build preamble for re-reviews.
 
@@ -12407,7 +12458,7 @@ def build_rereview_preamble(
 
     ratchet = build_convergence_ratchet_block(
         prior_findings, prior_items=prior_items, review_type=review_type,
-        resumed=resumed,
+        resumed=resumed, full_items=fresh_session,
     )
     has_ratchet = bool(ratchet)
 
@@ -12423,7 +12474,7 @@ Re-read the updated specs from disk — do NOT rely on cached content."""
             else "After reviewing the updated specs, conduct a fresh plan review."
         )
 
-        return f"""{ratchet}## IMPORTANT: Re-review After Fixes
+        preamble = f"""{ratchet}## IMPORTANT: Re-review After Fixes
 
 This is a RE-REVIEW. Specs have been modified since your last review.
 
@@ -12459,7 +12510,7 @@ Task specs need updating when epic changes affect:
         context_instruction = """Re-read these files from the repository to see the latest changes.
 Re-read from disk — do NOT rely on cached content."""
 
-        return f"""{ratchet}## IMPORTANT: Re-review After Fixes
+        preamble = f"""{ratchet}## IMPORTANT: Re-review After Fixes
 
 This is a RE-REVIEW. Code has been modified to address gaps since your last review.
 
@@ -12482,7 +12533,7 @@ Re-read from disk — do NOT rely on cached content."""
             else "After reviewing the updated code, conduct a fresh implementation review."
         )
 
-        return f"""{ratchet}## IMPORTANT: Re-review After Fixes
+        preamble = f"""{ratchet}## IMPORTANT: Re-review After Fixes
 
 This is a RE-REVIEW. Code has been modified since your last review.
 
@@ -12496,6 +12547,16 @@ This is a RE-REVIEW. Code has been modified since your last review.
 ---
 
 """
+    if fresh_session:
+        return (
+            "## Independent re-review session\n\n"
+            "This is a new reviewer session. The prior findings are the full "
+            "record from the previous reviewer; verify each one independently "
+            "against the current artifacts and the fix commits.\n\n"
+            + preamble.replace("Your PRIOR review's", "The previous review's")
+            .replace("since your last review", "since the previous review")
+        )
+    return preamble
 
 
 def get_actor() -> str:
@@ -43488,9 +43549,11 @@ def _gather_review_identity_diff(base_sha: str, head_sha: str = "HEAD") -> str:
     )
 
 
-def _clear_stale_review_receipt(receipt_path: Optional[str]) -> None:
+def _clear_stale_review_receipt(
+    receipt_path: Optional[str], *, preserve_prior: bool = False
+) -> None:
     """Archive valid evidence before unlinking a stale latest pointer."""
-    if not receipt_path:
+    if not receipt_path or preserve_prior:
         return
     try:
         path = Path(receipt_path)
@@ -43551,6 +43614,7 @@ def _rereview_prompt_pair(
     prior_findings: Optional[str],
     prior_items: Optional[dict],
     two_phase: bool,
+    fresh_session: bool = False,
 ) -> tuple[str, Optional[str]]:
     """Build the (dispatch, injected) prompt pair for one re-review round.
 
@@ -43565,6 +43629,7 @@ def _rereview_prompt_pair(
     preamble = build_rereview_preamble(
         files, review_type,
         prior_findings=prior_findings, prior_items=prior_items,
+        fresh_session=fresh_session,
     )
     if not two_phase:
         return preamble + prompt, None
@@ -43573,6 +43638,87 @@ def _rereview_prompt_pair(
         prior_findings=prior_findings, prior_items=prior_items, resumed=True,
     )
     return lean + prompt, preamble + prompt
+
+
+def _apply_re_review_session_policy(
+    args: argparse.Namespace,
+    session_id: Optional[str],
+    is_rereview: bool,
+    prior_model: Optional[str],
+    prior_effort: Optional[str],
+) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
+    """Keep receipt lineage while selecting a new CLI session when requested."""
+    fresh = is_rereview and getattr(args, "re_review_session", "resume") == "fresh"
+    if fresh:
+        # The receipt stays intact: its findings, history, hash, and round state
+        # still drive the ratchet and finalization. Only the transport session is
+        # replaced. A new session must record the model it actually dispatches,
+        # not the prior session's Codex-only resume metadata.
+        return None, None, None, True
+    return session_id, prior_model, prior_effort, False
+
+
+def _require_fresh_receipt_backend(
+    args: argparse.Namespace, receipt_path: str, backend: str
+) -> None:
+    """Never turn a foreign review receipt into a synthetic first round."""
+    if getattr(args, "re_review_session", "resume") != "fresh":
+        return
+    try:
+        prior = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return
+    if not isinstance(prior, dict) or "verdict" not in prior:
+        return
+    prior_mode = prior.get("mode")
+    if prior_mode == backend or (backend == "codex" and prior_mode is None):
+        # Older Codex receipts predate `mode`; their session and concrete model
+        # still go through the route and identity checks below.
+        return
+    error_exit(
+        "fresh re-review requires the same backend as the prior receipt; "
+        f"receipt mode is {prior_mode!r}, requested backend is {backend!r}",
+        use_json=args.json,
+        code=2,
+    )
+
+
+def _require_fresh_re_review_route(
+    receipt_path: str,
+    backend: str,
+    resolved_spec: "BackendSpec",
+    *,
+    include_effort: bool,
+    use_json: bool,
+) -> None:
+    """Refuse model drift before reserving a fresh re-review round.
+
+    A new session has no model frozen by a previous CLI conversation. Its
+    current route must therefore match the concrete model and effort that the
+    previous receipt records. Unknown/floor selectors cannot prove parity.
+    """
+    try:
+        prior = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        prior = None
+    prior_model = prior.get("model") if isinstance(prior, dict) else None
+    prior_effort = prior.get("effort") if isinstance(prior, dict) else None
+    prior_mode = prior.get("mode") if isinstance(prior, dict) else None
+    mode_ok = prior_mode == backend or (backend == "codex" and prior_mode is None)
+    model_ok = (
+        isinstance(prior_model, str)
+        and prior_model not in ("auto", "default")
+        and prior_model == resolved_spec.model
+    )
+    effort_ok = not include_effort or prior_effort == resolved_spec.effort
+    if not mode_ok or not model_ok or not effort_ok:
+        error_exit(
+            "fresh re-review route differs from the previous receipt's "
+            "backend/model/effort, or that receipt lacks a concrete model; "
+            "restore the same route before dispatch",
+            use_json=use_json,
+            code=2,
+        )
 
 
 def require_execution_provider_configuration():
@@ -44083,6 +44229,7 @@ def _backend_review_receipt_payload(
     pre_consumption: bool = False,
     draws: Optional[list] = None,
     merged_tag_mismatch: Optional[str] = None,
+    previous_session_id: Optional[str] = None,
 ) -> dict:
     """Build the receipt body (no findings/criteria) with stable key order.
 
@@ -44103,6 +44250,9 @@ def _backend_review_receipt_payload(
         receipt_data["base"] = base_branch
     receipt_data["verdict"] = verdict
     receipt_data["session_id"] = session_id
+    if previous_session_id:
+        receipt_data["previous_session_id"] = previous_session_id
+        receipt_data["re_review_session"] = "fresh"
     receipt_data["model"] = effective_model
     if include_effort:
         receipt_data["effort"] = effective_effort
@@ -44243,6 +44393,7 @@ def _write_backend_review_receipt(
     publish_out: Optional[dict] = None,
     draws: Optional[list] = None,
     merged_tag_mismatch: Optional[str] = None,
+    previous_session_id: Optional[str] = None,
     extra_fields: Optional[dict] = None,
     precondition=None,
 ) -> bool:
@@ -44303,6 +44454,7 @@ def _write_backend_review_receipt(
         unaddressed_rids=unaddressed_rids,
         draws=draws,
         merged_tag_mismatch=merged_tag_mismatch,
+        previous_session_id=previous_session_id,
     )
     if extra_fields:
         # PR #392 r26: preserved phase state and snapshot stamps ride the ONE
@@ -44601,6 +44753,9 @@ def cmd_backend_review(
     from ``args.review_backend`` / ``args.review_kind`` (parameterized argparse).
     Supports impl / plan / completion kinds.
     """
+    backend = backend or getattr(args, "review_backend", None)
+    kind = kind or getattr(args, "review_kind", None)
+    args.review_kind = kind
     _validate_review_policies(args)
     if getattr(args, "require_managed_execution", False):
         try:
@@ -44614,8 +44769,6 @@ def cmd_backend_review(
                 code=2,
             )
     _wire_backend_review_hooks()
-    backend = backend or getattr(args, "review_backend", None)
-    kind = kind or getattr(args, "review_kind", None)
     if backend not in BACKEND_REGISTRY or BACKEND_REGISTRY[backend].get("run_exec") is None:
         error_exit(
             f"cmd_backend_review: backend {backend!r} has no review hooks",
@@ -44656,6 +44809,7 @@ def _dispatch_backend_review(
     reservation_id: Optional[str] = None,
     injected_prompt: Optional[str] = None,
     resume_model: Optional[str] = None,
+    fresh_prior_session_id: Optional[str] = None,
 ) -> tuple[str, Optional[str], int, str]:
     """Run a backend and refund if dispatch itself terminates before a result.
 
@@ -44697,6 +44851,19 @@ def _dispatch_backend_review(
             else (task_id or spec_id or "branch")
         )
         args.claude_range = (reviewed_base_sha, reviewed_head_sha, receipt_id)
+
+    def enforce_new_session(result):
+        if (
+            fresh_prior_session_id
+            and parse_codex_verdict(result[0])
+            and (not result[1] or result[1] == fresh_prior_session_id)
+        ):
+            return (
+                "", result[1], 2,
+                "fresh re-review did not return a distinct reviewer session",
+            )
+        return result
+
     try:
         if two_phase:
             out, sid, rc, err = reg["run_exec"](
@@ -44709,25 +44876,25 @@ def _dispatch_backend_review(
                 resume_only=True,
             )
             if not resolution_out.get("resume_failed"):
-                return out, sid, rc, err
+                return enforce_new_session((out, sid, rc, err))
             # Resume did not happen — the reviewer has no prior context, so the
             # findings have to travel in the prompt after all.
-            return reg["run_exec"](
+            return enforce_new_session(reg["run_exec"](
                 injected_prompt,
                 session_id=None,
                 repo_root=repo_root,
                 spec=resolved_spec,
                 resolution_out=resolution_out,
                 args=args,
-            )
-        return reg["run_exec"](
+            ))
+        return enforce_new_session(reg["run_exec"](
             prompt,
             session_id=session_id,
             repo_root=repo_root,
             spec=resolved_spec,
             resolution_out=resolution_out,
             args=args,
-        )
+        ))
     except SystemExit:
         attempt: dict = {}
         if spec_id and review_kind:
@@ -44744,7 +44911,9 @@ def _dispatch_backend_review(
                 use_json=args.json,
                 reservation_id=reservation_id,
             )
-        _clear_stale_review_receipt(receipt_path)
+        _clear_stale_review_receipt(
+            receipt_path, preserve_prior=bool(fresh_prior_session_id)
+        )
         if attempt.get("transport_unhealthy"):
             error_exit(
                 f"TRANSPORT_UNHEALTHY: {backend} {review_type} review failed "
@@ -44773,7 +44942,9 @@ def _dispatch_backend_review(
                 use_json=args.json,
                 reservation_id=reservation_id,
             )
-        _clear_stale_review_receipt(receipt_path)
+        _clear_stale_review_receipt(
+            receipt_path, preserve_prior=bool(fresh_prior_session_id)
+        )
         if attempt.get("transport_unhealthy"):
             error_exit(
                 f"TRANSPORT_UNHEALTHY: {backend} {review_type} review failed "
@@ -44872,6 +45043,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
     # argv budget; with nothing embedded there is no budget to reserve and no
     # ordering constraint left.
     repo_root = get_repo_root()
+    _require_fresh_receipt_backend(args, receipt_path, backend)
     session_id, is_rereview, prior_receipt_model, prior_receipt_effort = (
         _resume_session_from_receipt(
             receipt_path,
@@ -44880,6 +45052,18 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
             require_nonempty_sid=reg["require_nonempty_sid"],
         )
     )
+    prior_session_id = session_id
+    session_id, prior_receipt_model, prior_receipt_effort, fresh_session = (
+        _apply_re_review_session_policy(
+            args, session_id, is_rereview, prior_receipt_model, prior_receipt_effort,
+        )
+    )
+    if fresh_session:
+        _require_fresh_re_review_route(
+            receipt_path, backend, resolved_spec,
+            include_effort=reg["include_effort"], use_json=args.json,
+        )
+        resolved_spec = dataclass_replace(resolved_spec, model_explicit=True)
     if reg["mint_session_id"] and not session_id:
         session_id = str(uuid.uuid4())
 
@@ -44914,6 +45098,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
                 and bool(reg.get("two_phase_resume"))
                 and not fanout_receipt
             ),
+            fresh_session=fresh_session,
         )
 
     # fn-90 R7 / fn-187 R1: backends whose reviewer inherits ambient instructions
@@ -44980,6 +45165,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         reservation_id=reservation_id,
         injected_prompt=injected_prompt,
         resume_model=prior_receipt_model,
+        fresh_prior_session_id=prior_session_id if fresh_session else None,
     )
 
     # The effort the dispatch ACTUALLY sent: the bind below swaps in the
@@ -45036,6 +45222,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         classification_counts=classification_counts,
         unaddressed_rids=unaddressed_rids,
         pre_consumption=True,
+        previous_session_id=prior_session_id if fresh_session else None,
     ) if receipt_target else None
 
     attempt_summary: dict = {}
@@ -45082,6 +45269,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         receipt_target=receipt_target,
         receipt_payload=receipt_payload,
         receipt_criteria_text=review_text,
+        preserve_prior_receipt=fresh_session,
     )
 
     if receipt_path:
@@ -45107,6 +45295,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
             findings_container=findings_container,
             findings_built=True,
             journaled_reservation_id=reservation_id if receipt_target else None,
+            previous_session_id=prior_session_id if fresh_session else None,
         )
 
     if args.json:
@@ -45202,6 +45391,7 @@ def _finish_backend_exec(
     receipt_target: Optional[str] = None,
     receipt_payload: Optional[dict] = None,
     receipt_criteria_text: Optional[str] = None,
+    preserve_prior_receipt: bool = False,
 ) -> str:
     """Shared post-exec gates and verdict-aware round finalization.
 
@@ -45275,7 +45465,9 @@ def _finish_backend_exec(
             findings_built=findings_built,
         )
     if attempt.get("transport_unhealthy"):
-        _clear_stale_review_receipt(receipt_path)
+        _clear_stale_review_receipt(
+            receipt_path, preserve_prior=preserve_prior_receipt
+        )
         count = attempt["consecutive_transport_failures"]
         cap = attempt["transport_failure_cap"]
         error_exit(
@@ -45292,7 +45484,9 @@ def _finish_backend_exec(
         )
 
     if sandbox_failure:
-        _clear_stale_review_receipt(receipt_path)
+        _clear_stale_review_receipt(
+            receipt_path, preserve_prior=preserve_prior_receipt
+        )
         msg = (
             "Codex sandbox blocked operations during review. Reviewers are "
             "READ-ONLY by contract: a reviewer that needed a write or a "
@@ -45308,7 +45502,9 @@ def _finish_backend_exec(
         error_exit(msg, use_json=args.json, code=3)
 
     if exit_code != 0:
-        _clear_stale_review_receipt(receipt_path)
+        _clear_stale_review_receipt(
+            receipt_path, preserve_prior=preserve_prior_receipt
+        )
         msg = (stderr or output or f"{reg['cli_label']} failed").strip()
         error_exit(
             f"{reg['cli_label']} failed: {msg}"
@@ -45316,7 +45512,9 @@ def _finish_backend_exec(
             use_json=args.json, code=2,
         )
 
-    _clear_stale_review_receipt(receipt_path)
+    _clear_stale_review_receipt(
+        receipt_path, preserve_prior=preserve_prior_receipt
+    )
     error_exit(
         f"{reg['no_verdict_label']} review completed but no verdict found "
         f"in output. Expected <verdict>SHIP</verdict>, "
@@ -45403,6 +45601,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         or os.environ.get("REVIEW_RECEIPT_PATH")
         or _spec_review_receipt_default("plan", epic_id)
     )
+    _require_fresh_receipt_backend(args, receipt_path, backend)
     session_id, is_rereview, prior_receipt_model, prior_receipt_effort = (
         _resume_session_from_receipt(
             receipt_path,
@@ -45411,6 +45610,18 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
             require_nonempty_sid=reg["require_nonempty_sid"],
         )
     )
+    prior_session_id = session_id
+    session_id, prior_receipt_model, prior_receipt_effort, fresh_session = (
+        _apply_re_review_session_policy(
+            args, session_id, is_rereview, prior_receipt_model, prior_receipt_effort,
+        )
+    )
+    if fresh_session:
+        _require_fresh_re_review_route(
+            receipt_path, backend, resolved_spec,
+            include_effort=reg["include_effort"], use_json=args.json,
+        )
+        resolved_spec = dataclass_replace(resolved_spec, model_explicit=True)
     if reg["mint_session_id"] and not session_id:
         session_id = str(uuid.uuid4())
 
@@ -45424,6 +45635,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
             prior_findings=prior_findings,
             prior_items=prior_items,
             two_phase=bool(session_id) and bool(reg.get("two_phase_resume")),
+            fresh_session=fresh_session,
         )
     if reg.get("needs_persona_override"):
         persona = build_review_persona_override()
@@ -45470,6 +45682,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         reservation_id=reservation_id,
         injected_prompt=injected_prompt,
         resume_model=prior_receipt_model,
+        fresh_prior_session_id=prior_session_id if fresh_session else None,
     )
 
     # The effort the dispatch ACTUALLY sent: the bind below swaps in the
@@ -45514,6 +45727,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         include_effort=reg["include_effort"],
         base_branch=base_branch,
         pre_consumption=True,
+        previous_session_id=prior_session_id if fresh_session else None,
     ) if receipt_target else None
 
     attempt_summary: dict = {}
@@ -45569,6 +45783,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         receipt_target=receipt_target,
         receipt_payload=receipt_payload,
         receipt_criteria_text=review_text,
+        preserve_prior_receipt=fresh_session,
     )
 
     # issue #279: the attempt row and the SHIP cap reset land in ONE atomic
@@ -45599,6 +45814,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
             findings_built=True,
             journaled_reservation_id=reservation_id if receipt_target else None,
             publish_out=publish_out,
+            previous_session_id=prior_session_id if fresh_session else None,
         )
 
     # Receipt evidence lands before terminal status (PR #290 bot r9, mirroring
@@ -45713,6 +45929,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         )
     except ReviewEvidenceError as exc:
         error_exit(str(exc), use_json=args.json, code=2)
+    _require_fresh_receipt_backend(args, receipt_path, backend)
     session_id, is_rereview, prior_receipt_model, prior_receipt_effort = (
         _resume_session_from_receipt(
             receipt_path,
@@ -45721,6 +45938,18 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
             require_nonempty_sid=reg["require_nonempty_sid"],
         )
     )
+    prior_session_id = session_id
+    session_id, prior_receipt_model, prior_receipt_effort, fresh_session = (
+        _apply_re_review_session_policy(
+            args, session_id, is_rereview, prior_receipt_model, prior_receipt_effort,
+        )
+    )
+    if fresh_session:
+        _require_fresh_re_review_route(
+            receipt_path, backend, resolved_spec,
+            include_effort=reg["include_effort"], use_json=args.json,
+        )
+        resolved_spec = dataclass_replace(resolved_spec, model_explicit=True)
     if reg["mint_session_id"] and not session_id:
         session_id = str(uuid.uuid4())
 
@@ -45743,6 +45972,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
             prior_findings=prior_findings,
             prior_items=prior_items,
             two_phase=bool(session_id) and bool(reg.get("two_phase_resume")),
+            fresh_session=fresh_session,
         )
     if reg.get("needs_persona_override"):
         persona = build_review_persona_override()
@@ -45810,6 +46040,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         reservation_id=reservation_id,
         injected_prompt=injected_prompt,
         resume_model=prior_receipt_model,
+        fresh_prior_session_id=prior_session_id if fresh_session else None,
     )
 
     # The effort the dispatch ACTUALLY sent: the bind below swaps in the
@@ -45864,6 +46095,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         classification_counts=classification_counts,
         unaddressed_rids=unaddressed_rids,
         pre_consumption=True,
+        previous_session_id=prior_session_id if fresh_session else None,
     ) if receipt_target else None
 
     attempt_summary: dict = {}
@@ -45914,6 +46146,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         receipt_target=receipt_target,
         receipt_payload=receipt_payload,
         receipt_criteria_text=review_text,
+        preserve_prior_receipt=fresh_session,
     )
 
     receipt_published = True
@@ -45941,6 +46174,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
             findings_built=True,
             journaled_reservation_id=reservation_id if receipt_target else None,
             publish_out=publish_out,
+            previous_session_id=prior_session_id if fresh_session else None,
         )
 
     # Receipt evidence must land before terminal status (PR #290 bot r2): when
@@ -47505,17 +47739,23 @@ def cmd_review_route(args: argparse.Namespace) -> None:
         else:
             print(f"PHASE_LEASE={payload['phase_lease']}")
         return
+    try:
+        re_review_session = _resolve_re_review_session(None)
+    except ValueError as exc:
+        error_exit(str(exc), use_json=args.json, code=2)
     result = compute_review_route(
         flow_dir, repo_root, task_id,
         receipt_path=getattr(args, "receipt", None),
         rotate_stale=bool(getattr(args, "rotate_stale", False)),
         force=bool(getattr(args, "force", False)),
     )
+    result["re_review_session"] = re_review_session
     if args.json:
         json_output(result)
         return
     print(f"ACTION={result['action']} ({result['reason']})")
     print(f"RECEIPT_PATH={result['receipt_path']}")
+    print(f"RE_REVIEW_SESSION={result['re_review_session']}")
     if result["task_id"]:
         print(f"TASK_ID={result['task_id']}")
     print(result["message"], file=sys.stderr if result["action"] == "stop" else sys.stdout)
@@ -54316,6 +54556,10 @@ def _add_impl_review_parser(sub, backend: str):
         "--receipt", help="Receipt file path for session continuity"
     )
     p.add_argument(
+        "--re-review-session", choices=REVIEW_POLICY_VALUES["review.reReviewSession"],
+        help="Re-review session policy (resume or fresh); overrides project and user defaults",
+    )
+    p.add_argument(
         "--force",
         action="store_true",
         help="Human-only override for an unchanged-artifact refusal",
@@ -54524,6 +54768,10 @@ def _add_plan_review_parser(sub, backend: str):
     p.add_argument("--base", default="main", help="Base branch for context")
     p.add_argument("--receipt", help="Receipt file path for session continuity")
     p.add_argument(
+        "--re-review-session", choices=REVIEW_POLICY_VALUES["review.reReviewSession"],
+        help="Re-review session policy (resume or fresh); overrides project and user defaults",
+    )
+    p.add_argument(
         "--force",
         action="store_true",
         help="Human-only override for an unchanged-artifact refusal",
@@ -54555,6 +54803,10 @@ def _add_completion_review_parser(sub, backend: str):
     p.add_argument("epic", help="Spec ID (e.g., fn-1, fn-1-add-auth)")
     p.add_argument("--base", default="main", help="Base branch for diff")
     p.add_argument("--receipt", help="Receipt file path for session continuity")
+    p.add_argument(
+        "--re-review-session", choices=REVIEW_POLICY_VALUES["review.reReviewSession"],
+        help="Re-review session policy (resume or fresh); overrides project and user defaults",
+    )
     p.add_argument(
         "--force",
         action="store_true",

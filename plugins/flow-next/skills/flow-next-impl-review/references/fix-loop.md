@@ -31,7 +31,7 @@ One fix pass, then one re-review:
 4. **Fix code** and run tests/lints
 5. **Commit fixes**, with one `Declined #<n>: <reason>` line in the message for each finding listed as a follow-up (mandatory before re-review; never blanket-stage with `git add --all`). Then, only when step 4's green run included one of the repo's full-gate commands: read [fix-gate-receipt.md](../../../references/fix-gate-receipt.md) and mint its receipt.
 6. **Re-review** (always a SINGLE dispatch — the first-round fan-out never re-runs):
-   - **Codex, Claude, Copilot, Cursor**: Re-run `flowctl <backend> impl-review` per [../workflow-cli.md](../workflow-cli.md) Step 5 (the receipt resumes the reviewer's session when its `mode` is that backend). After a fan-out round (`draws[]` on the receipt) the FULL merged prior-finding container is injected with every merged ordinal — automatic, no flag.
+   - **Codex, Claude, Copilot, Cursor**: Re-run `flowctl <backend> impl-review` per [../workflow-cli.md](../workflow-cli.md) Step 5. The receipt supplies the prior findings. Session continuity follows `review.reReviewSession`: `resume` continues the reviewer's session when its `mode` is that backend; `fresh` starts one independent reviewer session with the full prior-finding container. After a fan-out round (`draws[]` on the receipt), every merged ordinal is injected under either policy.
    - **Host**: Continue through [../workflow-host.md](../workflow-host.md)'s selected
      re-review path — one FRESH read-only subagent (host sessions are never
      resumed) with the full merged prior-finding container injected into its
