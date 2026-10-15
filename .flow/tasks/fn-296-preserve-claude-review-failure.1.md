@@ -10,8 +10,8 @@ Diagnose the official Claude error result without accepting verdict text from fa
 All R1-R3 in the parent spec are satisfied; preserve failing SHIP-tag rejection and explicit model pin no-fallback behavior.
 
 ## Done summary
-TBD
-
+Blocked:
+verification failed: coordinator thread has native fileChange entries: /Users/julien/Dev/flow-next-claude-review-recovery/.flow/tmp/claude-result-diagnostics-plan.md
 ## Evidence
 - Commits:
 - Tests:
