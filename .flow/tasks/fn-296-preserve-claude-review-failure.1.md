@@ -59,9 +59,18 @@ refunds, or diff delivery.
 All R1-R3 in the parent spec are satisfied; preserve failing SHIP-tag rejection and explicit model pin no-fallback behavior.
 
 ## Done summary
-Blocked:
-verification failed: coordinator thread has native fileChange entries: /Users/julien/Dev/flow-next-claude-review-recovery/.flow/tmp/claude-result-diagnostics-plan.md
+# fn-296 completion summary
+
+Installed the reviewed Flow-Next 8.7.0 runtime from source commit `1950d9a24f49803146dd6dffcaf0b9ddb06042bc` using the official Codex installer. The installed Claude review adapter strictly validates the result envelope, preserves successful custom-model output when stderr has diagnostics, suppresses verdict-shaped output after process failure, and falls back only for a genuine model-unavailable result. The installed `flowctl.py` matches reviewed source byte for byte.
+
+The official Qwen/L40S correctness review finalized SHIP with no findings after reading the complete frozen diff and parent spec R1–R3. Review reservation: `8e525610475743449c23652351422b0b`; session: `ec4e9702-3078-447a-80a0-8f5cf8b9e6cb`.
+
+The coordinator-provided full-suite result was 4,047 tests across 218 files, zero failures, and seven conditional skips. The suite was not rerun, as instructed. Local verification passed the official installer preflight, the official installation, post-install tracker manifest validation (49 files), `flowctl usage`, `flowctl --help`, source/install fingerprint comparison, configuration preservation checks, and standalone role/verifier byte comparisons. `flowctl --version` is unsupported by this CLI and exits 2 because it requires a subcommand; source and installed plugin metadata both report version 8.7.0.
+
+The installation did not publish upstream, commit changes, or modify task/spec state.
+
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 1950d9a24f49803146dd6dffcaf0b9ddb06042bc
+- Tests: Coordinator-provided full-suite result (not rerun): 4047 tests, 218 files, 0 failures, 7 conditional skips; log /tmp/flow-next-stable-port-full-tests.log., python3 scripts/merge_codex_config.py /Users/julien/.codex/config.toml plugins/flow-next/codex/agents --max-threads 12 --check (exit 0)., CODEX_HOME=/Users/julien/.codex /bin/bash scripts/install-codex.sh (exit 0; 29 skills, 21 agents, 26 prompts)., python3 plugins/flow-next/scripts/lib/verify_tracker_manifest.py /Users/julien/.codex/scripts (exit 0; 49 files verified)., /Users/julien/.codex/scripts/flowctl usage (exit 0)., /Users/julien/.codex/scripts/flowctl --help (exit 0)., Source/install flowctl.py byte comparison (exit 0; SHA-256 0beff1946a255673b7eafb37cd5c547050e465ee20385b86e7d7f3f115ad4ef4)., Configuration and custom role/verifier preservation comparison (exit 0; multi_agent_v2=true, implementer gpt-6-luna/max)., /Users/julien/.codex/scripts/flowctl --version (exit 2; unsupported because this CLI requires a subcommand).
 - PRs:

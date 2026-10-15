@@ -1,22 +1,69 @@
 {
   "branch_name": "fn-296-preserve-claude-review-failure",
-  "completion_review_status": "unknown",
-  "completion_reviewed_at": null,
+  "completion_review_status": "not_required",
+  "completion_reviewed_at": "2026-10-15T18:29:33.745677Z",
   "created_at": "2026-10-15T16:53:22.380373Z",
   "default_impl": null,
   "default_review": null,
   "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-296-preserve-claude-review-failure",
-  "impl_review_rounds": {},
+  "impl_review_rounds": {
+    "fn-296-preserve-claude-review-failure.1": 0
+  },
   "next_task": 1,
   "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "ready": true,
+  "review_attempts": [
+    {
+      "artifact_sha256": "736640764370e82326efacbb6b0f3e4eb58453bb0f2e21e36cbb72654a659769",
+      "backend": "claude",
+      "base_sha": "e6e9572d974751f9818563052a694fe90e4858d5",
+      "counter_kind": "impl",
+      "effort": "medium",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "claude",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "1950d9a24f49803146dd6dffcaf0b9ddb06042bc",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "qwen-l40s",
+      "outcome": "verdict",
+      "output_bytes": 158,
+      "output_sha256": "6ff70da3d83706800ca3cabc6ba62603ba0485fcf5259d27f1be54ce68686975",
+      "reservation_id": "8e525610475743449c23652351422b0b",
+      "round_consumed": true,
+      "scope": "impl:fn-296-preserve-claude-review-failure.1",
+      "superseded_by": null,
+      "task": "fn-296-preserve-claude-review-failure.1",
+      "timestamp": "2026-10-15T18:21:53.441791Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "impl:fn-296-preserve-claude-review-failure.1": 1
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-296-preserve-claude-review-failure.1": 0
+  },
   "spec_path": ".flow/specs/fn-296-preserve-claude-review-failure.md",
-  "status": "open",
+  "status": "done",
   "title": "Preserve Claude review failure diagnostics",
   "tracker": {
     "baseHashFlow": null,
@@ -29,5 +76,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-15T17:56:16.866583Z"
+  "updated_at": "2026-10-15T18:29:34.078340Z"
 }
