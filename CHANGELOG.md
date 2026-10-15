@@ -6,6 +6,10 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ## Unreleased
 
+### Fixed
+
+- **Claude reviews keep successful output when stderr also warns about an unavailable model.** Malformed results and nonzero exits cannot publish verdicts or trigger fallback.
+
 ## [flow-next 8.7.0] - 2026-10-14
 
 Teams that must show what was required, built, tested, reviewed and approved (GxP, medical devices, finance) can now have flow-next keep that record itself. Three opt-in pieces feed a team's validation; none makes anything compliant or certified, and with none of them set nothing changes. [Flow-Next in regulated environments](https://flow-next.dev/guides/regulated-environments/).
