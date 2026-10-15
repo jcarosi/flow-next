@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-296-preserve-claude-review-failure",
   "spec_path": ".flow/tasks/fn-296-preserve-claude-review-failure.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Port verified Claude result fix to stable 8.7.0",
   "updated_at": "2026-10-15T17:51:58.849268Z"
 }
