@@ -2,6 +2,9 @@
 
 Read from phases.md Phase 3 when this run implements more than one task, or when a single task
 goes to a worker. Phases 1-2 are done; Phases 4-5 in [phases.md](../phases.md) follow this file.
+When native provenance is enabled, follow
+[implementation-provenance.md](implementation-provenance.md) before dispatch and through the
+conductor-owned completion gate below.
 
 ## Phase 3: Task Scheduling (several tasks)
 
@@ -261,7 +264,8 @@ ran review). Content lives in those files — read them, never a restatement.
 
 **Before accepting any worker return**, use the existing `$FLOWCTL show <task-id> --json` read below (or the handover path's status read) and check the host's background-task list or process table only for commands attributable to that task's lane by its workspace (on the single-worker path the sole lane is the conductor's checkout, so a command started there during the dispatch is that worker's); unattributable commands are not that worker's, and `in_progress` alone triggers nothing: a confirmed parallel-wave or host-deferred handover with no attributable live command proceeds through its existing gates (3d.0 first where applicable). For any `in_progress` return with an attributable live command, a confirmed handover included, wait within the dispatch `TIMEBOX`, then dispatch a re-anchoring continuation worker into the same workspace after the command exits, without counting the early return as a failed attempt; past `TIMEBOX`, the existing stand-down and 2-strike rules below govern, and with no live command the existing not-done diagnosis applies.
 
-**Parallel wave or reviewer-overlap dispatch** (3a `Dispatch count` > 1, or an
+**Parallel wave, native-provenance handover, or reviewer-overlap dispatch**
+(3a `Dispatch count` > 1, a one-task native-provenance handover, or an
 overlapped one-task wave): read
 [references/wave-join.md](wave-join.md) and execute it — it owns the
 join report, integration, collision handling (never auto-resolve), the

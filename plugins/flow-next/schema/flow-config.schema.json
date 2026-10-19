@@ -10,6 +10,45 @@
       "description": "URL of the JSON Schema this config validates against, stamped by /flow-next:setup. Inert to flowctl (just a string); editors are the consumer.",
       "type": "string"
     },
+    "implementation": {
+      "description": "Implementation evidence settings. Native provenance is optional and off by default; see docs/flowctl.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provenance": {
+          "description": "Require native Codex implementation provenance at flowctl done: off or codex-native.",
+          "type": "string",
+          "enum": [
+            "off",
+            "codex-native"
+          ],
+          "default": "off"
+        },
+        "roles": {
+          "description": "Configured native role names mapped to the model and effort expected in their Codex metadata. Optional require_reason requests an exact escalation reason before dispatch. Required when codex-native is enabled.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": {
+                "type": "string",
+                "pattern": "^\\S(?:.*\\S)?$"
+              },
+              "effort": {
+                "type": "string",
+                "pattern": "^\\S(?:.*\\S)?$"
+              },
+              "require_reason": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "default": {}
+        }
+      }
+    },
     "judge": {
       "description": "Optional TypeSafe Jev judgment settings.",
       "type": "object",

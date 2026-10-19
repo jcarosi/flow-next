@@ -1,9 +1,10 @@
 # Wave join, integrate, and verify (gated reference)
 
-> **Loaded only when this run dispatched a parallel wave** (multi-task.md 3a
-> `Dispatch count` > 1) **or a reviewer-overlap one-task wave**. A run whose
-> waves are all single, non-overlapped workers never reads this file — multi-task.md 3d's
-> inline single-worker verify + failure rules cover it.
+> **Loaded when this run dispatched a parallel wave** (multi-task.md 3a
+> `Dispatch count` > 1), a reviewer-overlap one-task wave, or a one-task
+> native-provenance handover. A run whose waves are all single,
+> non-overlapped workers with provenance off never reads this file —
+> multi-task.md 3d's inline single-worker verify + failure rules cover it.
 
 Contents:
 
@@ -12,6 +13,10 @@ Contents:
 - [Reviewer overlap](#reviewer-overlap) — the schedule point, its preconditions, and the plan-sync barrier
 - [Per-task review, integrated verify, completion](#per-task-review-integrated-verify-completion) — the six ordered steps
 - [Partial failures](#partial-failures) — diagnose inside the assigned workspace before classifying
+
+When `.flow/config.json` enables `implementation.provenance=codex-native`, also
+follow [`implementation-provenance.md`](implementation-provenance.md) for the
+native child handover and final candidate revalidation before `flowctl done`.
 
 ## Join and integrate
 

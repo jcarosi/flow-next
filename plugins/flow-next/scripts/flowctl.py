@@ -1406,6 +1406,89 @@ REVIEW_POLICY_VALUES = {
     "review.fanoutExecution": REVIEW_FANOUT_EXECUTION_VALUES,
     "review.copilotDiffDelivery": COPILOT_DIFF_DELIVERY_VALUES,
 }
+IMPLEMENTATION_PROVENANCE_VALUES = ("off", "codex-native")
+
+
+def _validate_implementation_roles(value: Any) -> dict[str, dict[str, Any]]:
+    """Validate the configured native role-to-model policy without pinning roles."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            "implementation.roles must be an object mapping role names to "
+            "objects with model and effort strings"
+        )
+    roles: dict[str, dict[str, Any]] = {}
+    for role, details in value.items():
+        if not isinstance(role, str) or not role.strip() or role != role.strip():
+            raise ValueError(
+                "implementation.roles keys must be non-empty role names without surrounding whitespace"
+            )
+        if (
+            not isinstance(details, dict)
+            or not {"model", "effort"} <= set(details)
+            or set(details) - {"model", "effort", "require_reason"}
+        ):
+            raise ValueError(
+                f"implementation.roles.{role} must contain model and effort, "
+                "with only optional require_reason"
+            )
+        model = details.get("model")
+        effort = details.get("effort")
+        if not isinstance(model, str) or not model.strip() or model != model.strip():
+            raise ValueError(
+                f"implementation.roles.{role}.model must be a non-empty string"
+            )
+        if not isinstance(effort, str) or not effort.strip() or effort != effort.strip():
+            raise ValueError(
+                f"implementation.roles.{role}.effort must be a non-empty string"
+            )
+        normalized = {"model": model, "effort": effort}
+        if "require_reason" in details:
+            if not isinstance(details["require_reason"], bool):
+                raise ValueError(
+                    f"implementation.roles.{role}.require_reason must be a boolean"
+                )
+            normalized["require_reason"] = details["require_reason"]
+        roles[role] = normalized
+    return roles
+
+
+def _implementation_provenance_settings(raw_config: Optional[dict]) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Read and strictly validate provenance settings from raw project config."""
+    config = raw_config or {}
+    implementation = config.get("implementation", {})
+    if not isinstance(implementation, dict):
+        raise ValueError("implementation must be an object")
+    unknown = set(implementation) - {"provenance", "roles"}
+    if unknown:
+        raise ValueError(
+            "Unknown implementation setting(s): " + ", ".join(sorted(unknown))
+        )
+    mode = implementation.get("provenance", "off")
+    if not isinstance(mode, str) or mode not in IMPLEMENTATION_PROVENANCE_VALUES:
+        raise ValueError(
+            "Invalid implementation.provenance value "
+            f"{mode!r}. Expected one of: "
+            + ", ".join(IMPLEMENTATION_PROVENANCE_VALUES)
+        )
+    roles = _validate_implementation_roles(implementation.get("roles", {}))
+    if mode == "codex-native" and not roles:
+        raise ValueError(
+            "implementation.provenance is codex-native but implementation.roles is empty; "
+            "configure at least one native role with model and effort"
+        )
+    return mode, roles
+
+
+def _load_implementation_provenance_settings(
+    config_path: Optional[Path] = None,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Read provenance policy without the ordinary config reader's lenient fallback."""
+    config_path = config_path or get_flow_dir() / CONFIG_FILE
+    try:
+        raw_config = _read_flow_config_file(config_path)
+    except ValueError as exc:
+        raise ValueError(f"Cannot read implementation provenance policy: {exc}") from exc
+    return _implementation_provenance_settings(raw_config)
 
 
 def _review_config_enum(key: str) -> str:
@@ -1430,6 +1513,7 @@ def _review_fanout_execution() -> str:
 def get_default_config() -> dict:
     """Return default config structure."""
     return {
+        "implementation": {"provenance": "off", "roles": {}},
         "memory": {"enabled": True},
         # fn-83.4 — NO `gate` key here: the plan-sync skip-gate was proven
         # non-viable (fn-83.6 cross-repo verdict FAIL; decision record
@@ -20246,6 +20330,24 @@ def cmd_config_set(args: argparse.Namespace) -> None:
                 use_json=args.json, code=2,
             )
 
+    if canonical_key == "implementation.provenance":
+        if not isinstance(args.value, str) or args.value not in IMPLEMENTATION_PROVENANCE_VALUES:
+            error_exit(
+                f"Invalid implementation.provenance value {args.value!r}. Expected one of: "
+                + ", ".join(IMPLEMENTATION_PROVENANCE_VALUES),
+                use_json=args.json, code=2,
+            )
+
+    if canonical_key == "implementation.roles":
+        try:
+            roles_value = json.loads(args.value)
+        except (json.JSONDecodeError, TypeError):
+            roles_value = None
+        try:
+            _validate_implementation_roles(roles_value)
+        except ValueError as exc:
+            error_exit(str(exc), use_json=args.json, code=2)
+
     # fn-123 R5 - reject invalid host backend specs at WRITE time. The read-time
     # lenient parser treats a bad host spec as unset (loud, but late); accepting
     # `host:opus` here and failing later is a worse contract. Only host and the
@@ -37743,6 +37845,33 @@ def cmd_start(args: argparse.Namespace) -> None:
         _note_spec_reopened(reopened, task_def["spec"], None)
 
 
+def _verify_native_provenance(
+    repo_root: Path,
+    request: dict,
+    policy: dict[str, dict[str, Any]],
+) -> dict:
+    """Run the Codex-native verifier and require its stable receipt digest."""
+    try:
+        from flowctl_codex_provenance import VerificationError, verify_native
+    except (ImportError, AttributeError) as exc:
+        raise ValueError(
+            "the Codex-native verifier is unavailable beside flowctl; "
+            "reinstall or update Flow-Next"
+        ) from exc
+    try:
+        receipt = verify_native(repo_root, request, policy)
+    except VerificationError as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(receipt, dict):
+        raise ValueError("the Codex-native verifier returned an invalid receipt")
+    digest = receipt.get("receipt_sha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(
+            "the Codex-native verifier returned no valid receipt_sha256"
+        )
+    return receipt
+
+
 def cmd_done(args: argparse.Namespace) -> None:
     """Complete a task with summary and evidence."""
     if not ensure_flow_exists():
@@ -37830,7 +37959,10 @@ def cmd_done(args: argparse.Namespace) -> None:
     # `files` / `files_touched` feed the PR cognitive-aid export.
     unknown_keys = sorted(
         evidence.keys()
-        - {"commits", "tests", "prs", "base_commit", "files", "files_touched"}
+        - {
+            "commits", "tests", "prs", "base_commit", "files", "files_touched",
+            "native_provenance",
+        }
     )
     if unknown_keys:
         print(
@@ -37848,23 +37980,6 @@ def cmd_done(args: argparse.Namespace) -> None:
             f"{summary.rstrip()}\n\n"
             "stage: plan-sync - skipped(config: planSync.enabled != true)"
         )
-
-    # Format evidence as markdown (coerce to strings, handle string-vs-array)
-    def to_list(val: Any) -> list:
-        if val is None:
-            return []
-        if isinstance(val, str):
-            return [val] if val else []
-        return list(val)
-
-    evidence_md = []
-    commits = [str(x) for x in to_list(evidence.get("commits"))]
-    tests = [str(x) for x in to_list(evidence.get("tests"))]
-    prs = [str(x) for x in to_list(evidence.get("prs"))]
-    evidence_md.append(f"- Commits: {', '.join(commits)}" if commits else "- Commits:")
-    evidence_md.append(f"- Tests: {', '.join(tests)}" if tests else "- Tests:")
-    evidence_md.append(f"- PRs: {', '.join(prs)}" if prs else "- PRs:")
-    evidence_content = "\n".join(evidence_md)
 
     current_actor = get_actor()
     store = get_state_store()
@@ -37898,9 +38013,100 @@ def cmd_done(args: argparse.Namespace) -> None:
                 use_json=args.json,
             )
 
+        try:
+            provenance_mode, provenance_policy = _load_implementation_provenance_settings()
+        except ValueError as exc:
+            error_exit(str(exc), use_json=args.json, code=2)
+
+        if provenance_mode == "codex-native":
+            provenance_input = evidence.get("native_provenance")
+            if not isinstance(provenance_input, dict):
+                error_exit(
+                    "Native implementation provenance is enabled. Add a "
+                    "native_provenance request to the done evidence with "
+                    "parent_thread, children, base_commit, and task.",
+                    use_json=args.json,
+                    code=2,
+                )
+            request_fields = {"parent_thread", "children", "base_commit", "task"}
+            allowed_request_fields = request_fields | {"reason", "receipt"}
+            unknown_request_fields = set(provenance_input) - allowed_request_fields
+            if unknown_request_fields:
+                error_exit(
+                    "Invalid native_provenance request field(s): "
+                    + ", ".join(sorted(unknown_request_fields)),
+                    use_json=args.json,
+                    code=2,
+                )
+            missing_request_fields = request_fields - set(provenance_input)
+            if missing_request_fields:
+                error_exit(
+                    "Native provenance request is missing: "
+                    + ", ".join(sorted(missing_request_fields)),
+                    use_json=args.json,
+                    code=2,
+                )
+            if provenance_input.get("task") != args.id:
+                error_exit(
+                    f"Native provenance task must exactly match {args.id!r}.",
+                    use_json=args.json,
+                    code=2,
+                )
+
+            # Existing receipt material is intentionally discarded. Every done
+            # call re-reads native history and the current candidate.
+            provenance_request = {
+                key: provenance_input[key]
+                for key in request_fields | ({"reason"} & set(provenance_input))
+            }
+            try:
+                provenance_receipt = _verify_native_provenance(
+                    get_repo_root().resolve(), provenance_request, provenance_policy
+                )
+            except ValueError as exc:
+                error_exit(
+                    f"Native implementation provenance failed for {args.id}: {exc}",
+                    use_json=args.json,
+                    code=2,
+                )
+            evidence["native_provenance"] = {
+                **provenance_request,
+                "receipt": provenance_receipt,
+            }
+            receipt_sha256 = provenance_receipt["receipt_sha256"]
+            summary = re.sub(
+                r"(?im)^\s*stage:\s*native-provenance\b[^\r\n]*(?:\r?\n|$)",
+                "",
+                summary,
+            ).rstrip()
+            if summary:
+                summary += "\n\n"
+            summary += (
+                "stage: native-provenance - verified "
+                f"(receipt_sha256={receipt_sha256})"
+            )
+
         current_spec = read_text_or_exit(
             task_spec_path, f"Task {args.id} spec", use_json=args.json
         )
+
+        # Format evidence as markdown (coerce to strings, handle string-vs-array).
+        def to_list(val: Any) -> list:
+            if val is None:
+                return []
+            if isinstance(val, str):
+                return [val] if val else []
+            return list(val)
+
+        evidence_md = []
+        commits = [str(x) for x in to_list(evidence.get("commits"))]
+        tests = [str(x) for x in to_list(evidence.get("tests"))]
+        prs = [str(x) for x in to_list(evidence.get("prs"))]
+        evidence_md.append(f"- Commits: {', '.join(commits)}" if commits else "- Commits:")
+        evidence_md.append(f"- Tests: {', '.join(tests)}" if tests else "- Tests:")
+        evidence_md.append(f"- PRs: {', '.join(prs)}" if prs else "- PRs:")
+        evidence_content = "\n".join(evidence_md)
+
         try:
             updated_spec = patch_task_section(current_spec, "## Done summary", summary)
             updated_spec = patch_task_section(updated_spec, "## Evidence", evidence_content)
@@ -37934,6 +38140,86 @@ def cmd_done(args: argparse.Namespace) -> None:
     else:
         print(f"Task {args.id} completed")
     print_tracked_write_advisory(task_spec_path)
+
+
+def cmd_provenance_check(args: argparse.Namespace) -> None:
+    """Revalidate native implementation provenance without writing Flow state."""
+    repo_root = (
+        Path(args.repo_root).expanduser().resolve()
+        if args.repo_root
+        else get_repo_root().resolve()
+    )
+    if not repo_root.is_dir():
+        error_exit(f"Repository root is not a directory: {repo_root}", use_json=args.json)
+
+    request_path = Path(args.request)
+    try:
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        error_exit(f"Cannot read native provenance request {request_path}: {exc}", use_json=args.json)
+    if not isinstance(request, dict):
+        error_exit("Native provenance request must be a JSON object", use_json=args.json)
+
+    flow_dir = repo_root / FLOW_DIR
+    if flow_dir.exists():
+        if args.policy:
+            error_exit(
+                "--policy is only for repositories without .flow; Flow repositories "
+                "use implementation.roles from .flow/config.json",
+                use_json=args.json,
+            )
+        try:
+            mode, policy = _load_implementation_provenance_settings(
+                flow_dir / CONFIG_FILE
+            )
+        except ValueError as exc:
+            error_exit(str(exc), use_json=args.json, code=2)
+        if mode != "codex-native":
+            error_exit(
+                "Native provenance checking requires "
+                "implementation.provenance=codex-native in .flow/config.json",
+                use_json=args.json,
+                code=2,
+            )
+    else:
+        if not args.policy:
+            error_exit(
+                "Outside a Flow repository, pass --policy FILE containing a "
+                "role-to-model-and-effort JSON object",
+                use_json=args.json,
+                code=2,
+            )
+        policy_path = Path(args.policy)
+        try:
+            policy_json = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy = _validate_implementation_roles(policy_json)
+        except (OSError, ValueError) as exc:
+            error_exit(f"Cannot read native provenance policy {policy_path}: {exc}", use_json=args.json, code=2)
+        if not policy:
+            error_exit(
+                "Native provenance policy must configure at least one role",
+                use_json=args.json,
+                code=2,
+            )
+
+    try:
+        receipt = _verify_native_provenance(repo_root, request, policy)
+    except ValueError as exc:
+        error_exit(f"Native implementation provenance failed: {exc}", use_json=args.json, code=2)
+
+    if args.json:
+        json_output(
+            {
+                "verified": True,
+                "repo_root": str(repo_root),
+                "receipt": receipt,
+            }
+        )
+    else:
+        print(
+            "Native implementation provenance verified "
+            f"(receipt_sha256={receipt['receipt_sha256']})"
+        )
 
 
 def cmd_block(args: argparse.Namespace) -> None:
@@ -58145,6 +58431,28 @@ def main() -> None:
     p_done.add_argument("--force", action="store_true", help="Skip status checks")
     p_done.add_argument("--json", action="store_true", help="JSON output")
     p_done.set_defaults(func=cmd_done)
+
+    # provenance (Codex-native implementation evidence; read-only checker)
+    p_provenance = subparsers.add_parser(
+        "provenance", help="Native implementation provenance commands"
+    )
+    provenance_sub = p_provenance.add_subparsers(
+        dest="provenance_cmd", required=True
+    )
+    p_provenance_check = provenance_sub.add_parser(
+        "check", help="Revalidate native provenance against the current candidate"
+    )
+    p_provenance_check.add_argument(
+        "--request", required=True, help="JSON native provenance request file"
+    )
+    p_provenance_check.add_argument(
+        "--policy", help="Role-to-model-and-effort JSON file outside Flow repositories"
+    )
+    p_provenance_check.add_argument(
+        "--repo-root", help="Repository root (defaults to the Git root from the current directory)"
+    )
+    p_provenance_check.add_argument("--json", action="store_true", help="JSON output")
+    p_provenance_check.set_defaults(func=cmd_provenance_check)
 
     # block
     p_block = subparsers.add_parser("block", help="Block task with reason")

@@ -41,6 +41,19 @@ DESCRIPTIONS: dict[str, str] = {
         "/flow-next:setup. Inert to flowctl (just a string); editors are "
         "the consumer."
     ),
+    "implementation": (
+        "Implementation evidence settings. Native provenance is optional and "
+        "off by default; see docs/flowctl.md."
+    ),
+    "implementation.provenance": (
+        "Require native Codex implementation provenance at flowctl done: off "
+        "or codex-native."
+    ),
+    "implementation.roles": (
+        "Configured native role names mapped to the model and effort expected "
+        "in their Codex metadata. Optional require_reason requests an exact "
+        "escalation reason before dispatch. Required when codex-native is enabled."
+    ),
     "judge": "Optional TypeSafe Jev judgment settings.",
     "judge.enabled": (
         "Enable the optional judge when TYPESAFE_API_KEY is present in the "
@@ -514,6 +527,26 @@ def _build_table() -> list[tuple[str, dict]]:
     """Ordered TABLE: dotted path -> container or leaf fragment."""
     return [
         ("$schema", {"type": "string"}),
+        ("implementation", {"kind": "object", "open": False}),
+        (
+            "implementation.provenance",
+            {"type": "string", "enum": list(flowctl.IMPLEMENTATION_PROVENANCE_VALUES)},
+        ),
+        (
+            "implementation.roles",
+            {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "model": {"type": "string", "pattern": r"^\S(?:.*\S)?$"},
+                        "effort": {"type": "string", "pattern": r"^\S(?:.*\S)?$"},
+                        "require_reason": {"type": "boolean", "default": False},
+                    },
+                },
+            },
+        ),
         ("judge", {"kind": "object", "open": False}),
         ("judge.enabled", {"type": "boolean"}),
         ("memory", {"kind": "object", "open": False}),

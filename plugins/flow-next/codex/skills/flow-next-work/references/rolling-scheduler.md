@@ -309,7 +309,11 @@ default shape.
   and executes its memory auto-capture using the review rounds and fix commits:
   check `memory.enabled`, capture only after NEEDS_WORK → SHIP under its
   existing non-trivial-fix/dedup rules, and warn on failure without blocking
-  completion. Then `flowctl done` with the
+  completion. When `implementation.provenance=codex-native`, complete the
+  final candidate check and provide the native request from
+  [implementation-provenance.md](implementation-provenance.md) before
+  `flowctl done`; the transition repeats it under the task lock. Then run
+  `flowctl done` with the
   updated task-unique summary/evidence (plan-sync is off on this route, and
   `done` records its skip stage line); verify `done`; run the 3d.1 tracker
   touchpoint; THEN free the slot and recompute admission at 3a. done(N) fires only

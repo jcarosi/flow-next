@@ -6,6 +6,10 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ## Unreleased
 
+### Added
+
+- **Opt-in native Codex implementation provenance.** Flow can require configured native role history and patch evidence before `done`; a read-only `flowctl provenance check` supports final-candidate revalidation.
+
 ### Fixed
 
 - **Claude reviews keep successful output when stderr also warns about an unavailable model.** Malformed results and nonzero exits cannot publish verdicts or trigger fallback.
