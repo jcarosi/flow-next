@@ -110,7 +110,9 @@ Both call the shared `verify_native` adapter, which reads supported Codex
 app-server history and checks the Git and disk candidate. The check command and
 standalone checker do not write Flow state. Native verification is opt-in;
 with the setting unset or disabled, existing task completion remains
-compatible and does not require a native request.
+compatible and does not require a native request. For coordinator PR
+cognitive-aid artifacts, the standalone checker uses the canonical validator
+from its sibling `flowctl.py` and fails closed if that validator is unavailable.
 
 The request assigns every child a closed set of repository-relative files. The
 adapter replays all included children against the common base in native activity
@@ -153,12 +155,14 @@ thread metadata; it does not prove provider identity. Receipt hashes bind the
 serialized evidence against accidental changes. They are not signatures or an
 authenticity claim.
 
-When native provenance is unset or disabled by a valid Flow configuration,
-existing completion behavior remains compatible: caller-supplied opaque
-evidence is preserved and labeled `UNVERIFIED`. When native provenance is
-active, a fresh verified receipt replaces any caller-supplied receipt. Missing,
-unreadable, or malformed policy configuration cannot prove that the setting is
-off, so the gate fails closed in that case.
+When native provenance is unset or disabled, existing completion behavior
+remains compatible: caller-supplied `native_provenance` data is preserved as
+opaque evidence. This path adds no `UNVERIFIED` label or
+`stage: native-provenance` marker, so treat that data as unverified. An absent
+`.flow/config.json` or absent `implementation` setting resolves to `off`.
+When native provenance is active, a fresh verified receipt replaces any
+caller-supplied receipt. Unreadable or malformed configuration, or an unknown
+or invalid implementation policy, fails closed.
 
 Only changes visible in the checked Git candidate and supported native history
 can be compared. Ignored files and paths outside the repository are outside the
