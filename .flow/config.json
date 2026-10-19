@@ -24,6 +24,7 @@
   },
   "review": {
     "backend": "codex:gpt-6-astra:high",
+    "copilotDiffDelivery": "file",
     "fanoutExecution": "sequential",
     "maxIterations": 8
   },

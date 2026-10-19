@@ -17,7 +17,7 @@
 #   - Agents:    codex/agents/*.toml       → ~/.codex/agents/
 #   - Hooks:     none
 #   - Prompts:   commands/*.md             → ~/.codex/prompts/
-#   - CLI tools: flowctl, flowctl.py       → ~/.codex/scripts/
+#   - CLI tools: flowctl, flowctl.py, flowctl_codex_provenance.py → ~/.codex/scripts/
 #   - Scripts:   worktree.sh              → ~/.codex/scripts/  (from codex/skills/)
 #   - References: codex/references/*.md    → ~/.codex/references/
 #   - Docs:      codex/docs/flow-next/     → ~/.codex/docs/flow-next/ (owned namespace only)
@@ -292,6 +292,11 @@ fi
 if [ -f "$PLUGIN_DIR/scripts/flowctl.py" ]; then
     cp "$PLUGIN_DIR/scripts/flowctl.py" "$CODEX_DIR/scripts/"
 fi
+if [ ! -f "$PLUGIN_DIR/scripts/flowctl_codex_provenance.py" ]; then
+    echo -e "${RED}✗${NC} Codex-native provenance verifier missing from the source tree — corrupt checkout; re-clone and re-run" >&2
+    exit 1
+fi
+cp "$PLUGIN_DIR/scripts/flowctl_codex_provenance.py" "$CODEX_DIR/scripts/"
 # Skills invoke these bundled workflow blocks alongside flowctl. Missing source
 # is a corrupt install, never a reason to ship a skill with an absent command.
 for workflow_script in make-pr-preflight.sh make-pr-create.sh map.sh; do

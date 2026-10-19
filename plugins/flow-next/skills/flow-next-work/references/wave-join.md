@@ -1,9 +1,10 @@
 # Wave join, integrate, and verify (gated reference)
 
-> **Loaded only when this run dispatched a parallel wave** (multi-task.md 3a
-> `Dispatch count` > 1) **or a reviewer-overlap one-task wave**. A run whose
-> waves are all single, non-overlapped workers never reads this file — multi-task.md 3d's
-> inline single-worker verify + failure rules cover it.
+> **Loaded when this run dispatched a parallel wave** (multi-task.md 3a
+> `Dispatch count` > 1), a reviewer-overlap one-task wave, or a one-task
+> native-provenance handover. A run whose waves are all single,
+> non-overlapped workers with provenance off never reads this file —
+> multi-task.md 3d's inline single-worker verify + failure rules cover it.
 
 Contents:
 
@@ -12,6 +13,15 @@ Contents:
 - [Reviewer overlap](#reviewer-overlap) — the schedule point, its preconditions, and the plan-sync barrier
 - [Per-task review, integrated verify, completion](#per-task-review-integrated-verify-completion) — the six ordered steps
 - [Partial failures](#partial-failures) — diagnose inside the assigned workspace before classifying
+
+When `.flow/config.json` enables `implementation.provenance=codex-native`, also
+follow [`implementation-provenance.md`](implementation-provenance.md) for the
+native child handover and final candidate revalidation before `flowctl done`.
+For each task completion, include the full explicit union of native children
+whose changes are integrated in the candidate since their common immutable
+base, including sibling tasks. Keep each child's assigned files, linked-worktree
+`workspace` binding, and `task_declaration` with that child; do not exempt peer
+application paths because a sibling task already has its own completion.
 
 ## Join and integrate
 
@@ -37,6 +47,13 @@ integrated commit IDs (step 2 below) are. A workspace whose changes cannot be
 confirmed on the target, or that holds uncommitted work, PAUSES its cleanup
 and is reported to the conductor, never deleted — a teardown that assumed
 integration was complete is how finished work disappears without a trace.
+When `implementation.provenance=codex-native`, also keep each referenced
+workspace registered and available until all final candidate and acceptance
+revalidations using that delegation window are complete, including any final
+verification or commit that relies on the request; a done sibling does not
+release its workspace while another task's request includes it. See
+[`implementation-provenance.md`](implementation-provenance.md) for the request
+contract and limits.
 
 ## Join collision handling
 

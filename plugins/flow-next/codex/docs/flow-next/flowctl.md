@@ -1100,13 +1100,20 @@ flowctl done fn-1.2 --range BASE..HEAD --test "python3 -m unittest" --summary-fi
 
 # Inline form (short summaries / scripted callers)
 flowctl done fn-1.2 --summary "short summary" --evidence '{"commits":["abc"],"tests":["t"],"prs":[]}' [--force] [--json]
+
+# Revalidate an opt-in native Codex implementation request against the candidate
+flowctl provenance check --request request.json [--repo-root PATH] [--json]
+# Outside Flow, pass the configured role map explicitly
+flowctl provenance check --request request.json --repo-root PATH --policy roles.json [--json]
 ```
 
 - `--summary-file` / `--summary` - done-summary markdown (file or inline text). One of the pair is required.
 - `--evidence-json` / `--evidence` - evidence JSON (file or inline string). With neither flag the CLI records empty commit, test, and PR lists; the work and review contracts require evidence.
 - `--range BASE..HEAD` derives `commits` and `base_commit`; unreachable commits fail with the offending SHA. Repeat `--test` for multiple commands. Interleaved task histories keep explicit evidence lists.
 - `--force` - skip the `in_progress` status check.
-- Evidence must carry at least one of `commits`, `tests`, `prs`. Keys other than those, `base_commit`, `files` and `files_touched` print a stderr warning and are not rendered.
+- Evidence must carry at least one of `commits`, `tests`, `prs`. Keys other than those, `base_commit`, `files`, `files_touched`, and `native_provenance` print a stderr warning and are not rendered.
+- When `implementation.provenance` is `codex-native`, `native_provenance` must contain the request fields documented under [implementation provenance](../../skills/flow-next-work/references/implementation-provenance.md). `done` revalidates live native history and the candidate under the task lock before any receipt or status write; `--force` does not bypass it. In `off` mode, any supplied `native_provenance` value is opaque, unverified caller data and is stored unchanged. Only `codex-native` re-verifies the request and replaces a caller-supplied receipt.
+- `done` reads this policy strictly. A missing config file or a valid config with `implementation` absent or set to `off` preserves the default-off path. An unreadable or malformed config, an invalid mode, or an unknown `implementation` setting refuses completion because the gate cannot establish whether provenance is required; it never infers that the policy is off.
 - When `planSync.enabled` is not `true`, `done` appends `stage: plan-sync - skipped(config: planSync.enabled != true)` to the summary unless it already carries a plan-sync stage line.
 
 Evidence JSON format:
@@ -1289,6 +1296,8 @@ flowctl config set memory.enabled false [--json]
 | `memory.enabled` | bool | `true` | Enable memory system |
 | `planSync.enabled` | bool | `false` | Enable plan-sync after task completion (opt-in; configs from older inits may carry `true`) |
 | `planSync.crossSpec` | bool | `false` | Cross-spec plan-sync - scan other open specs for stale references after each task (opt-in; increases sync time)* |
+| `implementation.provenance` | string | `off` | Optional implementation gate: `off` preserves the default-off path when policy can be read; `codex-native` requires live native Codex delegation proof on every `done` transition. Invalid or unknown implementation settings, and unreadable or malformed config, fail closed because the policy cannot be established. See [implementation provenance](../../skills/flow-next-work/references/implementation-provenance.md). |
+| `implementation.roles` | object | `{}` | Native role policy keyed by role name, with `model` and `effort` strings and optional `require_reason` boolean (default `false`). Required and non-empty when `implementation.provenance` is `codex-native`; configure with a JSON object, for example `flowctl config set implementation.roles '{"<role-name>":{"model":"<model>","effort":"<effort>"}}'`. |
 | `scouts.github` | bool | `false` | Enable github-scout during planning (requires gh CLI) |
 | `review.backend` | string | `null` | Default review backend (`codex`, `copilot`, `cursor`, `claude`, `host`, `none`), or spec form (`codex:<model>:<effort>`, `claude:<model>:<effort>` with efforts `low`/`medium`/`high`/`xhigh`/`max`, `cursor:<model>` - cursor folds effort into the model, no `:effort` rung). If unset, review commands require `--review` or `FLOW_REVIEW_BACKEND`. A stale `rp` or `export` value prints a notice and review reads as not configured; `config set` rejects it. |
 | `review.fanoutExecution` | string | `concurrent` | First-round CLI review scheduling: concurrent by default or sequential in supplied axis order, completing each draw and its sidecars before starting the next; re-review stays single. |
@@ -1319,6 +1328,13 @@ flowctl config set memory.enabled false [--json]
 | `evidence.dir` | repo-relative path | `.flow/evidence` (absent) | Root of the per-spec evidence folders. A path that is absolute, resolves outside the repository, or passes through a symlink is refused when evidence is written. |
 | `spec.approval` | `local \| pr` | `local` (absent) | **Spec approval gate.** `local` leaves readiness as it is. Under `pr`, a spec is ready only once its spec PR (head branch `spec/<spec-id>`) has merged with at least one approving review: `spec ready` and `start` refuse an unapproved spec and point at [`references/spec-approval-pr.md`](../../references/spec-approval-pr.md), `flow --auto` selection and `judge route` hold it, and the first of them to see the approved merge records the approvers, the merge identity and the times as `spec_approval` on the spec sidecar, marks it ready, and (with `evidence.persist on`) writes `approval.json` to its evidence folder. `spec create`, `spec set-plan`, `task create` and `task set-spec` print a one-line pointer to that reference on stderr. `spec unready` (which a capture rewrite runs) withdraws a recorded approval, and only a spec PR merged after that counts again. A closed or approval-less PR, or an unreachable forge, leaves the spec not ready with the reason. An invalid value is rejected by `config set` and stops every gated command instead of falling back to `local`. The forge's branch protection decides who may approve; flowctl only reads and records it. |
 | `pilot.gateClasses` | string[] | `[]` | **Backlog-mode force-gate.** An optional list of class names (e.g. `["risky", "prod-config"]`) that, in backlog mode, force **surfacing before action** - a matching item is parked with a question (`ASKED`) instead of advanced full-auto, even when otherwise workable. A **sibling** key, deliberately NOT `pilot.autonomy.gate` (a scalar and an object cannot share the `pilot.autonomy` dot-path). Empty `[]` (default) = full-auto for every workable item. |
+
+The read-only `flowctl provenance check` command revalidates a request against
+the current Git and filesystem candidate. In a Flow repository it requires
+`implementation.provenance=codex-native` and reads the role map from
+`.flow/config.json`; outside Flow, pass `--repo-root` and `--policy` with a
+JSON role map. It writes only to stdout. This standalone check is detective
+evidence and does not prevent later filesystem changes.
 
 \* The pre-1.1.3 legacy alias `planSync.crossEpic` was **removed in 2.0.0** (it was readable through 1.x with a stderr deprecation warning). `flowctl` no longer reads or writes it - a leftover `crossEpic` key in `.flow/config.json` is inert. If you relied on it, set the canonical key once: `flowctl config set planSync.crossSpec true`.
 

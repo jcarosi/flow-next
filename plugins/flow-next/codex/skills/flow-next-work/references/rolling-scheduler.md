@@ -214,6 +214,12 @@ as written there:
   returns the parallel handover. Review and completion are conductor-owned
   for every backend (3d) - the conductor RECORDS each task's resolved
   `REVIEW_MODE` at dispatch and applies it itself after integration.
+- With native provenance enabled, each task's completion request covers the
+  full explicit union of native children whose changes are integrated since
+  their common immutable base, including earlier rolling admissions. Preserve
+  each child's assigned files and its `workspace` and `task_declaration`
+  bindings as specified in `implementation-provenance.md`; sibling application
+  files are never silently exempted.
 - **Notes pointer line:** when `.flow/tmp/notes_dir.<RUN_ID>` exists (the
   `RUN_ID` recorded at 3.0), re-read the path
   (`NOTES_DIR="$(cat .flow/tmp/notes_dir.<RUN_ID>)"` - never assume the 3.0
@@ -309,7 +315,11 @@ default shape.
   and executes its memory auto-capture using the review rounds and fix commits:
   check `memory.enabled`, capture only after NEEDS_WORK → SHIP under its
   existing non-trivial-fix/dedup rules, and warn on failure without blocking
-  completion. Then `flowctl done` with the
+  completion. When `implementation.provenance=codex-native`, complete the
+  final candidate check and provide the native request from
+  [implementation-provenance.md](implementation-provenance.md) before
+  `flowctl done`; the transition repeats it under the task lock. Then run
+  `flowctl done` with the
   updated task-unique summary/evidence (plan-sync is off on this route, and
   `done` records its skip stage line); verify `done`; run the 3d.1 tracker
   touchpoint; THEN free the slot and recompute admission at 3a. done(N) fires only

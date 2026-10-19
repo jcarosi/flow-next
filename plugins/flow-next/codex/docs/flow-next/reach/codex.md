@@ -13,9 +13,22 @@ How this harness obtains a model for a [tier](../orchestration.md#tiers-what-kin
 | In-host subagent | **Yes.** Model and effort steering on `spawn_agent` works on both paths since codex-cli 0.146.0 (measured from the child thread's rollout `turn_context`, never from the child's self-report). Precedence: a role's declared `model` / `model_reasoning_effort` wins over an explicit spawn parameter; where the role declares no model, the explicit parameter applies; with no `agent_type`, the explicit parameter applies and `reasoning_effort` may be set alone; the explicit `model` parameter accepts a shorter list than a role can pin. Two dispatch gotchas: `agent_type` takes the role's `name` (hyphenated), not the `[agents.<key>]` table key; `agent_type` requires `fork_turns: "none"`. A role's `sandbox_mode` is not enforced - a child inherits its parent's sandbox in both directions, so read-only is prompt-only here and containment comes from the parent launch flag (`codex -s read-only`). There is no in-band receipt of the effective model; pin, record what ran, and re-probe out of band. |
 | Shell out to another CLI | **Yes.** A fresh non-interactive run of a CLI takes its model and effort on the command line, so nothing can strip them. It works with this harness's own CLI (same family, different model) and with another vendor's. One condition: the parent sandbox must allow spawning a process and reaching the network. Watch on the child's own fan-out: openai/codex#33267, a `codex exec` parent unable to decode the result of a child that spawned subagents, is open upstream and reported on codex-cli 0.144 to 0.145 with the gpt-5.6 family; its minimal repro runs clean on codex-cli 0.153.4 with gpt-6-astra. A bridged child on a current build may fan out; on a build in the reported range, keep the child prompt flat. |
 
+## Optional native implementation provenance
+
+In a Flow-Next repository, `implementation.provenance=codex-native` can require
+the coordinator to hand implementation to a configured native Codex role and
+verify the completed child, its recorded model and effort, and its patch
+against the integrated candidate before task completion. Flow rechecks at the
+`done` transition and records a receipt digest. This requires supported live
+Codex app-server history and is opt-in; it does not narrow a child's tools or
+prevent later filesystem changes. See the [implementation provenance
+reference](../../../skills/flow-next-work/references/implementation-provenance.md).
+
 ## What is unavailable
 
-An in-band receipt of the model a subagent ran on, and a role-level sandbox narrowing. Nothing else is missing.
+There is no general in-band model receipt for arbitrary subagents or CLI
+bridges, and no role-level sandbox narrowing. Native Flow provenance covers
+only the supported Codex history and candidate checks described above.
 
 ## Degradation
 

@@ -1,0 +1,534 @@
+{
+  "branch_name": "feat/codex-native-provenance",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-10-19T18:05:10.674991Z",
+  "created_at": "2026-10-19T14:34:09.023180Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-305-native-implementation-provenance-with",
+  "impl_review_rounds": {
+    "fn-305-native-implementation-provenance-with.1": 0,
+    "fn-305-native-implementation-provenance-with.2": 0
+  },
+  "next_task": 1,
+  "no_plan": true,
+  "plan_review_rounds": 0,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "review_attempts": [
+    {
+      "artifact_sha256": "2b909404bdc8e16107b3f5efeda5fef9eff204d79c7a5c80a5acfbad28e9d48b",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "Available Model Group Fallbacks=None",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "62dcb6588b201b412459a0c2286aa3c148429617",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 222,
+      "output_sha256": "a199abe352ae680474413afcdc5c5ee0c0b3f85f51a63b580161995cf54717f0",
+      "reservation_id": "93ac6dd01f264ca69988cbf6166c7cfb",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:31:35.762699Z",
+      "verdict": null
+    },
+    {
+      "artifact_sha256": "2b909404bdc8e16107b3f5efeda5fef9eff204d79c7a5c80a5acfbad28e9d48b",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "[claude-code:unrecognized_model] {\"model\":\"qwen-l40s\",\"query_source\":\"sdk\"}",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "62dcb6588b201b412459a0c2286aa3c148429617",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 180,
+      "output_sha256": "52b4914b49b8894757a4f7744e3f595daf9cff6a7b5beb7a47c79746490351d5",
+      "reservation_id": "00ab25828a824d5db6bcc3dcfa8b651d",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:38:47.318261Z",
+      "verdict": null
+    },
+    {
+      "artifact_sha256": "d5af3316b4b78c74f3e24a7cb8bbbe9d0ee675fff9b382114a2c0c6c7969387e",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "149c172bdc7644bf104bbf30d52191a8bdc08406",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 414,
+      "output_sha256": "63468a79325b70b5118efb1746dcd029f0a69a4980be19fbc84c1e269f248b24",
+      "reservation_id": "b20aac1c102545e7b0865848eb1bf0a6",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:41:02.712283Z",
+      "verdict": null
+    },
+    {
+      "artifact_sha256": "a4f898c312609507c3bdd320575699e723ed638e93068bf762e609e07fed0245",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "effort": "medium",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "classification": "introduced",
+            "findingId": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "classification": "introduced",
+            "findingId": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "classification": "introduced",
+            "findingId": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "classification": "introduced",
+            "findingId": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "classification": "introduced",
+            "findingId": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-56908de5853ee3b66af20eef5e154c18",
+            "classification": "introduced",
+            "findingId": "finding-56908de5853ee3b66af20eef5e154c18",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-282b89cafda237055e5cd963560897b0",
+            "classification": "introduced",
+            "findingId": "finding-282b89cafda237055e5cd963560897b0",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "classification": "introduced",
+            "findingId": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "firstSeenThisRound": true,
+            "severity": "P3",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "4cc52a61fd6deb757a968bdcf2016531f56b0028",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 6841,
+      "output_sha256": "94c393e47087edaeba0e1a4f81900a8983177678fa248009207cd28a2104371e",
+      "reservation_id": "f97a93ec1d764299962cfe3127301550",
+      "round_consumed": true,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T17:03:09.418870Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "78565b7f43801c3f35d44eacb2d1425ebf0ad8bb6408ba9d13514383d186d6ed",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "classification": "introduced",
+            "findingId": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "classification": "introduced",
+            "findingId": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "classification": "introduced",
+            "findingId": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "classification": "introduced",
+            "findingId": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "classification": "introduced",
+            "findingId": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-56908de5853ee3b66af20eef5e154c18",
+            "classification": "introduced",
+            "findingId": "finding-56908de5853ee3b66af20eef5e154c18",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-282b89cafda237055e5cd963560897b0",
+            "classification": "introduced",
+            "findingId": "finding-282b89cafda237055e5cd963560897b0",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "withdrawn"
+          },
+          {
+            "chainRoot": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "classification": "introduced",
+            "findingId": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "firstSeenThisRound": false,
+            "severity": "P3",
+            "status": "withdrawn"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "64a7716e8d35a7d2b32783d160ecd7010be3334c",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 6222,
+      "output_sha256": "7938c4393d0f833e2a5c3d072be11647c27802527513348580b3e9ae1ca856fe",
+      "reservation_id": "a26875e4a98c4ff69b06da969145f4bd",
+      "round_consumed": true,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T17:31:17.523263Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "082ae73a7f5fd51dbd792969e85290645ad28c9a15303cd9fdab54f270470519",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "classification": "introduced",
+            "findingId": "finding-7531953b0fd5f3076dc4c827ebb8faf2",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "classification": "introduced",
+            "findingId": "finding-0f65c4a360a77db2b00252ed295e4527",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "classification": "introduced",
+            "findingId": "finding-e5ebff4095f9826d1e7f3089af7b97ec",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "classification": "introduced",
+            "findingId": "finding-f43e87eb3023813c3ba4ce827e342acb",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "classification": "introduced",
+            "findingId": "finding-e387f6a1eff1a2c022323f4ea955f5ba",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-56908de5853ee3b66af20eef5e154c18",
+            "classification": "introduced",
+            "findingId": "finding-56908de5853ee3b66af20eef5e154c18",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-282b89cafda237055e5cd963560897b0",
+            "classification": "introduced",
+            "findingId": "finding-282b89cafda237055e5cd963560897b0",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "withdrawn"
+          },
+          {
+            "chainRoot": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "classification": "introduced",
+            "findingId": "finding-dded22b72cfad54b532a9c45f1304b34",
+            "firstSeenThisRound": false,
+            "severity": "P3",
+            "status": "withdrawn"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 1,
+      "head_sha": "745c115087ab3da0341f6da3551b4cd48c5c6c47",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 4157,
+      "output_sha256": "82d221846dc893599dd4aafc535b5273f78098b607956ea7ba206ea326e659eb",
+      "reservation_id": "b285efbbe5fd4b55860febda7faeb83c",
+      "round_consumed": true,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T17:35:09.964122Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "7f0e5398b1337f0c435d344d1a9871db41e7b2f2e048742c4eba6269fb9aca4f",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "completion"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "e82a8f272767bf1f288edd714652ba81e900e3c2",
+      "head_sha_observed": true,
+      "kind": "completion",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 5697,
+      "output_sha256": "5c9890b3c10a99a55d8d427f613a33168858a4fecb03a380a1a8a9ade627fc2c",
+      "reservation_id": "c9af0b86fda842798ab8e4cb5763b3eb",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-10-19T17:38:09.465375Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "126870edcd8bc8aa819a3a4aedc61d0c4caf993b61289b9ecb62fa0e09248cf4",
+      "backend": "copilot",
+      "base_sha": "a9455a73536abc053e2823fbe3eeeb596b395640",
+      "counter_kind": "impl",
+      "effort": "medium",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "a828d9107e57787f42fa2b245f52f29650e78192",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 1597,
+      "output_sha256": "8206d45939486cc1253ff56664d0a35b66842b8cb82f1999dc8f73a32618fde9",
+      "reservation_id": "1d1cffe8b2fe439891095a001f77eb9b",
+      "round_consumed": true,
+      "scope": "impl:fn-305-native-implementation-provenance-with.2",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.2",
+      "timestamp": "2026-10-19T18:03:43.053110Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "6adf77d78b2b0d277254177299d6e89fa76cd70d343d45976105a09338c1b760",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "completion"
+      },
+      "forced": false,
+      "hash_epoch": 1,
+      "head_sha": "0a12da9dadd36fb1c7ee43252d999bc9b7892e46",
+      "head_sha_observed": true,
+      "kind": "completion",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 2526,
+      "output_sha256": "75fe4692944b458c017912ae118f9dedc78f338a1a00102b79f9390fd0201ae6",
+      "reservation_id": "6eb525c6416643758b7650276e7eca69",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-10-19T18:05:10.671535Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "impl:fn-305-native-implementation-provenance-with.1": 2,
+    "impl:fn-305-native-implementation-provenance-with.2": 1,
+    "plan#completion": 2
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "completion": 0,
+    "impl:fn-305-native-implementation-provenance-with.1": 0,
+    "impl:fn-305-native-implementation-provenance-with.2": 0
+  },
+  "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
+  "status": "done",
+  "title": "Native implementation provenance with scoped coordination and candidate integrity",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-10-19T18:06:22.326745Z"
+}

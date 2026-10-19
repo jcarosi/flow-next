@@ -159,11 +159,24 @@ Done when: `spec chain` reported `eligible: true`, the run is on the branch the 
 
 ## Phase 3: Implement
 
-**Several tasks, or a worker wanted:** read [references/multi-task.md](references/multi-task.md)
+**Native provenance policy (before route choice).** Read
+`$FLOWCTL config get implementation --json`. When
+`implementation.provenance` is `codex-native`, read
+[references/implementation-provenance.md](references/implementation-provenance.md)
+before claiming or dispatching. It applies to direct single-owner, rolling and
+wave routes; even one task must use a configured native worker, return with the
+task still `in_progress`, and leave integration, review, provenance revalidation
+and `flowctl done` to the conductor. The native child returns a complete
+handover and never completes its own task while its thread is active. If the
+policy is invalid or config loading reports an error, stop before implementation
+and leave the task incomplete.
+
+**Several tasks, a worker wanted, or native provenance enabled:** read [references/multi-task.md](references/multi-task.md)
 and follow it as this phase. That covers a spec with more than one open task, and a single task
 when the user or config names an implementer model or tier, when the task's review mode resolves
 to `host` (the writer never dispatches its own host review), or when your context is too full to
-implement well (say which in one line). Only on that route does
+implement well (say which in one line). Native provenance also takes this route for a single
+task. Only on that route does
 [references/judge-tier.md](references/judge-tier.md) apply.
 
 **One task (a one-task plan, a task-id run, or the direct route's implicit owner): implement it

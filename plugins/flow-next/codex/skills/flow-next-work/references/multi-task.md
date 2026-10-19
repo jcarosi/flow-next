@@ -2,6 +2,9 @@
 
 Read from phases.md Phase 3 when this run implements more than one task, or when a single task
 goes to a worker. Phases 1-2 are done; Phases 4-5 in [phases.md](../phases.md) follow this file.
+When native provenance is enabled, follow
+[implementation-provenance.md](implementation-provenance.md) before dispatch and through the
+conductor-owned completion gate below.
 
 ## Phase 3: Task Scheduling (several tasks)
 
@@ -172,10 +175,26 @@ Before spawning, apply [judge-tier.md](judge-tier.md) once for this task. Use it
 
 **When the implementer tier resolves to a model this harness reaches only over a CLI bridge, the worker bridges and the conductor never does.** The dispatch below is unchanged: the worker resolves the tier itself (worker Phase 1b), hands the task to the bridged child with the usage guide's brief, and reviews the child's commit range before its own review dispatch. The bridged child owns the task and its own delegation; a conductor that composed a brief, ran a bridge call, or fanned out on the implementer's behalf has broken this.
 
-Use the **worker** agent role to implement each selected task. For a multi-task
-wave, create one isolated mutable workspace and task-unique summary/evidence
-paths per worker, then dispatch the selected workers concurrently. For a
-one-task wave, use the existing single-worker path. On every route, choose and pass absolute, task-unique `HANDOVER_SUMMARY` and `HANDOVER_EVIDENCE` paths before dispatch; create their parent directory.
+Use the **worker** agent role to implement each selected task. When
+`implementation.provenance` is `codex-native`, dispatch an available configured
+native role with its exact configured name, model and effort. Create an
+isolated mutable workspace even for a one-task run, set `PARALLEL_WAVE: true`,
+and have the native child return a complete handover with the task still
+`in_progress`. The native child never runs `flowctl done` while its own thread
+is active; the conductor integrates, reviews and completes the task after the
+child returns. Use optional `workspace` for each child's absolute linked-worktree
+root (the path-mapping base; omission means the integrated repo root), and
+optional `task_declaration` for its exact
+`Implementation task:` value (default: the request's top-level `task`), as
+described in `implementation-provenance.md`. In a wave or rolling run, include
+the full explicit union of native children whose changes
+are present since their common immutable base, including sibling tasks; never
+silently exempt sibling application paths. Otherwise preserve the existing
+routes: for a multi-task wave, create one isolated mutable workspace and
+task-unique summary/evidence paths per worker, then dispatch the selected
+workers concurrently; for a one-task wave, use the existing single-worker
+path. On every route, choose and pass absolute, task-unique `HANDOVER_SUMMARY`
+and `HANDOVER_EVIDENCE` paths before dispatch; create their parent directory.
 
 **Commit the spec and task files BEFORE creating the workspaces.** A wave
 workspace is branched from a commit, so anything still uncommitted in the
@@ -243,10 +262,11 @@ behind.
 
 `BASELINE_HANDOFF` is optional. The conductor MAY pass it only when ALL hold: the prior task in this run reached done with its Phase 5 Verify green over the SAME Quick commands, HEAD has not moved since except by commits changing only `.flow/` paths, and the new task's declared Touches do not intersect files changed since that verification. Conductor judgment on stated facts; when in doubt, omit the line. On the wave route the first task receives no handoff. The rolling route instead runs a green spec-base baseline before its first admission and may hand that baseline to the first batch under the same `.flow/`-only rule. Check every intervening commit with `git log --format= --name-only <verified-sha>..HEAD`; any non-`.flow/` path invalidates the handoff, including changes later reverted.
 
-Set `PARALLEL_WAVE: true` only for a concurrently dispatched multi-task wave.
-Those workers implement, test, commit, and return their workspace, commits, and
-the exact handover paths. They do **not** call `flowctl done`, project tracker
-state, invoke plan-sync, run impl-review, or integrate their own commit. This
+Set `PARALLEL_WAVE: true` for a concurrently dispatched multi-task wave and for
+every native-provenance handover, including a one-task run. Those workers
+implement, test, commit, and return their workspace, commits, and the exact
+handover paths. They do **not** call `flowctl done`, project tracker state,
+invoke plan-sync, run impl-review, or integrate their own commit. This
 host-deferred shape is independent of `REVIEW_MODE`; the conductor preserves
 the resolved backend and applies it after integration. The prompt fields are an
 internal handoff, not a public CLI or stored schema.
@@ -261,7 +281,8 @@ ran review). Content lives in those files — read them, never a restatement.
 
 **Before accepting any worker return**, use the existing `$FLOWCTL show <task-id> --json` read below (or the handover path's status read) and check the host's background-task list or process table only for commands attributable to that task's lane by its workspace (on the single-worker path the sole lane is the conductor's checkout, so a command started there during the dispatch is that worker's); unattributable commands are not that worker's, and `in_progress` alone triggers nothing: a confirmed parallel-wave or host-deferred handover with no attributable live command proceeds through its existing gates (3d.0 first where applicable). For any `in_progress` return with an attributable live command, a confirmed handover included, wait within the dispatch `TIMEBOX`, then dispatch a re-anchoring continuation worker into the same workspace after the command exits, without counting the early return as a failed attempt; past `TIMEBOX`, the existing stand-down and 2-strike rules below govern, and with no live command the existing not-done diagnosis applies.
 
-**Parallel wave or reviewer-overlap dispatch** (3a `Dispatch count` > 1, or an
+**Parallel wave, native-provenance handover, or reviewer-overlap dispatch**
+(3a `Dispatch count` > 1, a one-task native-provenance handover, or an
 overlapped one-task wave): read
 [references/wave-join.md](wave-join.md) and execute it — it owns the
 join report, integration, collision handling (never auto-resolve), the

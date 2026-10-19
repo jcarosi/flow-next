@@ -317,6 +317,14 @@ arguments. flowctl never reads prose.
 
 ### Implementation offload: the bridge route
 
+Flow can optionally require native Codex implementation provenance at task
+completion. When `implementation.provenance` is `codex-native`, work dispatches
+through a configured native role, then revalidates the integrated candidate
+before `done`; the transition repeats that check under the task lock. See the
+[implementation provenance reference](../skills/flow-next-work/references/implementation-provenance.md).
+This policy does not apply to CLI bridges and does not narrow the child's
+available tools or confine filesystem writes.
+
 Offloading the token-heavy part (writing code) to a second CLI is a **routing decision you write, not a subsystem you configure**. There is no packaged delegation mode and no `work.delegate*` config: you drive the other CLI through a headless bridge, either ad hoc in the session or as standing policy in `CLAUDE.md` / `AGENTS.md`.
 
 ```bash
