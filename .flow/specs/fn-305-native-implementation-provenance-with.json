@@ -1,7 +1,7 @@
 {
   "branch_name": "feat/codex-native-provenance",
-  "completion_review_status": "unknown",
-  "completion_reviewed_at": null,
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-10-19T17:38:09.467738Z",
   "created_at": "2026-10-19T14:34:09.023180Z",
   "default_impl": null,
   "default_review": null,
@@ -398,14 +398,50 @@
       "task": "fn-305-native-implementation-provenance-with.1",
       "timestamp": "2026-10-19T17:35:09.964122Z",
       "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "7f0e5398b1337f0c435d344d1a9871db41e7b2f2e048742c4eba6269fb9aca4f",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "completion"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "e82a8f272767bf1f288edd714652ba81e900e3c2",
+      "head_sha_observed": true,
+      "kind": "completion",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 5697,
+      "output_sha256": "5c9890b3c10a99a55d8d427f613a33168858a4fecb03a380a1a8a9ade627fc2c",
+      "reservation_id": "c9af0b86fda842798ab8e4cb5763b3eb",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-10-19T17:38:09.465375Z",
+      "verdict": "SHIP"
     }
   ],
   "review_hash_epoch": {
-    "impl:fn-305-native-implementation-provenance-with.1": 2
+    "impl:fn-305-native-implementation-provenance-with.1": 2,
+    "plan#completion": 1
   },
   "review_pending_rounds": {},
   "review_reservations": {},
   "review_transport_failures": {
+    "completion": 0,
     "impl:fn-305-native-implementation-provenance-with.1": 0
   },
   "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
@@ -422,5 +458,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-19T17:35:09.967209Z"
+  "updated_at": "2026-10-19T17:38:09.468102Z"
 }
