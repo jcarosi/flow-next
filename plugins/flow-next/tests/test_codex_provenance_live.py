@@ -147,6 +147,7 @@ class CodexProvenanceLiveTests(unittest.TestCase):
         self.flowctl = _required_file(config.get("flowctl"), "flowctl")
         self.flow = config.get("flow")
         self.standalone = config.get("standalone")
+        self.worktree = config.get("worktree")
         self.assertIsInstance(self.flow, dict, "live config needs a flow object")
         self.assertIsInstance(
             self.standalone, dict, "live config needs a standalone object"
@@ -321,6 +322,34 @@ class CodexProvenanceLiveTests(unittest.TestCase):
                 "stage: native-provenance - verified",
                 task_spec.read_text(encoding="utf-8"),
             )
+
+    def test_real_linked_worktree_history_maps_to_integrated_repository(self) -> None:
+        if self.worktree is None:
+            self.skipTest("live config has no optional worktree fixture")
+        self.assertIsInstance(self.worktree, dict, "worktree must be an object")
+        repo = _required_repo(
+            self.worktree.get("repo_root"), "worktree.repo_root", self.fixture_root
+        )
+        request_path = _required_file(self.worktree.get("request"), "worktree.request")
+        request = self._read_request(request_path)
+        children = request.get("children")
+        self.assertIsInstance(children, list)
+        self.assertTrue(children)
+        self.assertTrue(
+            any(isinstance(child, dict) and child.get("workspace") for child in children),
+            "worktree request must bind at least one native child workspace",
+        )
+
+        result = self._flow_check(repo, request_path)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload.get("verified"), result.stdout)
+        receipt_children = payload["receipt"]["children"]
+        self.assertTrue(
+            any(child.get("workspace") != str(repo) for child in receipt_children),
+            "receipt must retain the linked workspace used for native path mapping",
+        )
 
     def test_staged_launcher_and_flowctl_share_the_standalone_native_api(self) -> None:
         request = self.standalone_request_path

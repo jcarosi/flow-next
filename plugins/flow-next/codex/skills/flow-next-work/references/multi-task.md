@@ -175,10 +175,26 @@ Before spawning, apply [judge-tier.md](judge-tier.md) once for this task. Use it
 
 **When the implementer tier resolves to a model this harness reaches only over a CLI bridge, the worker bridges and the conductor never does.** The dispatch below is unchanged: the worker resolves the tier itself (worker Phase 1b), hands the task to the bridged child with the usage guide's brief, and reviews the child's commit range before its own review dispatch. The bridged child owns the task and its own delegation; a conductor that composed a brief, ran a bridge call, or fanned out on the implementer's behalf has broken this.
 
-Use the **worker** agent role to implement each selected task. For a multi-task
-wave, create one isolated mutable workspace and task-unique summary/evidence
-paths per worker, then dispatch the selected workers concurrently. For a
-one-task wave, use the existing single-worker path. On every route, choose and pass absolute, task-unique `HANDOVER_SUMMARY` and `HANDOVER_EVIDENCE` paths before dispatch; create their parent directory.
+Use the **worker** agent role to implement each selected task. When
+`implementation.provenance` is `codex-native`, dispatch an available configured
+native role with its exact configured name, model and effort. Create an
+isolated mutable workspace even for a one-task run, set `PARALLEL_WAVE: true`,
+and have the native child return a complete handover with the task still
+`in_progress`. The native child never runs `flowctl done` while its own thread
+is active; the conductor integrates, reviews and completes the task after the
+child returns. Use optional `workspace` for each child's absolute linked-worktree
+root (the path-mapping base; omission means the integrated repo root), and
+optional `task_declaration` for its exact
+`Implementation task:` value (default: the request's top-level `task`), as
+described in `implementation-provenance.md`. In a wave or rolling run, include
+the full explicit union of native children whose changes
+are present since their common immutable base, including sibling tasks; never
+silently exempt sibling application paths. Otherwise preserve the existing
+routes: for a multi-task wave, create one isolated mutable workspace and
+task-unique summary/evidence paths per worker, then dispatch the selected
+workers concurrently; for a one-task wave, use the existing single-worker
+path. On every route, choose and pass absolute, task-unique `HANDOVER_SUMMARY`
+and `HANDOVER_EVIDENCE` paths before dispatch; create their parent directory.
 
 **Commit the spec and task files BEFORE creating the workspaces.** A wave
 workspace is branched from a commit, so anything still uncommitted in the
@@ -246,10 +262,11 @@ behind.
 
 `BASELINE_HANDOFF` is optional. The conductor MAY pass it only when ALL hold: the prior task in this run reached done with its Phase 5 Verify green over the SAME Quick commands, HEAD has not moved since except by commits changing only `.flow/` paths, and the new task's declared Touches do not intersect files changed since that verification. Conductor judgment on stated facts; when in doubt, omit the line. On the wave route the first task receives no handoff. The rolling route instead runs a green spec-base baseline before its first admission and may hand that baseline to the first batch under the same `.flow/`-only rule. Check every intervening commit with `git log --format= --name-only <verified-sha>..HEAD`; any non-`.flow/` path invalidates the handoff, including changes later reverted.
 
-Set `PARALLEL_WAVE: true` only for a concurrently dispatched multi-task wave.
-Those workers implement, test, commit, and return their workspace, commits, and
-the exact handover paths. They do **not** call `flowctl done`, project tracker
-state, invoke plan-sync, run impl-review, or integrate their own commit. This
+Set `PARALLEL_WAVE: true` for a concurrently dispatched multi-task wave and for
+every native-provenance handover, including a one-task run. Those workers
+implement, test, commit, and return their workspace, commits, and the exact
+handover paths. They do **not** call `flowctl done`, project tracker state,
+invoke plan-sync, run impl-review, or integrate their own commit. This
 host-deferred shape is independent of `REVIEW_MODE`; the conductor preserves
 the resolved backend and applies it after integration. The prompt fields are an
 internal handoff, not a public CLI or stored schema.

@@ -16,11 +16,14 @@ import selectors
 import shutil
 import stat
 import subprocess
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
+from xml.etree import ElementTree
 
 MAX_LINE_BYTES = 64 * 1024 * 1024
 PAGE_SIZE = 100
@@ -50,6 +53,21 @@ FLOW_TRACKER_ALIAS_ID = re.compile(r"^([a-z][a-z0-9]{0,9})-(\d+)(?:\.(\d+))?$")
 FLOW_TRACKER_CANONICAL_ID = re.compile(
     r"^([a-z][a-z0-9]{0,9})-(\d+)-[a-z0-9][a-z0-9-]*[a-z0-9]?(?:\.(\d+))?$"
 )
+FLOW_MEMORY_CATEGORIES = {
+    "bug": frozenset({
+        "build-errors", "test-failures", "runtime-errors", "performance",
+        "security", "integration", "data", "ui",
+    }),
+    "knowledge": frozenset({
+        "architecture-patterns", "conventions", "tooling-decisions", "workflow",
+        "best-practices", "decisions",
+    }),
+}
+FLOW_EVIDENCE_RECEIPT_TYPES = frozenset(
+    {"plan_review", "impl_review", "completion_review", "qa_verdict"}
+)
+MAX_INERT_FLOW_BYTES = 4 * 1024 * 1024
+MAX_COGNITIVE_AID_BYTES = 512 * 1024
 UNIFIED_HUNK = re.compile(
     rb"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:[^\r\n]*)?(?:\r?\n)?$"
 )
@@ -349,6 +367,34 @@ def _path_alias(path: str) -> str:
     return unicodedata.normalize("NFC", path).casefold()
 
 
+def _canonical_directory(value: object, label: str) -> Path:
+    raw = _string(value, label)
+    candidate = Path(os.path.expanduser(raw))
+    if not candidate.is_absolute():
+        raise ProvenanceError(f"{label} must be an absolute canonical path")
+    _raw_components(str(candidate), label)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ProvenanceError(f"{label} is unavailable: {exc}") from exc
+    if str(candidate) != str(resolved):
+        raise ProvenanceError(f"{label} must use its canonical path without aliases")
+    if not resolved.is_dir():
+        raise ProvenanceError(f"{label} must be a directory")
+    cursor = Path(resolved.anchor)
+    for component in resolved.parts[1:]:
+        cursor = cursor / component
+        try:
+            info = cursor.lstat()
+        except OSError as exc:
+            raise ProvenanceError(f"cannot inspect {label} component {cursor}: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise ProvenanceError(f"{label} cannot traverse a symlink: {cursor}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise ProvenanceError(f"{label} contains a non-directory component: {cursor}")
+    return resolved
+
+
 def _assert_safe_path(root: Path, relative: PurePosixPath) -> Path:
     cursor = root
     for index, component in enumerate(relative.parts):
@@ -456,10 +502,227 @@ def _coordination_kind(path: str) -> str | None:
             if _flow_id_is_task(filename.rsplit(".", 1)[0]) is True:
                 return "task"
         return None
+    if len(parts) == 3 and parts[:2] == (".flow", "memory"):
+        if parts[2] == "README.md" or parts[2] in {
+            "pitfalls.md", "conventions.md", "decisions.md",
+        }:
+            return "memory_readme"
+        return None
+    if len(parts) == 5 and parts[:2] == (".flow", "memory"):
+        track, category, filename = parts[2:]
+        if track in FLOW_MEMORY_CATEGORIES and category in FLOW_MEMORY_CATEGORIES[track]:
+            match = re.fullmatch(r"([a-z0-9]+(?:-[a-z0-9]+)*)-(\d{4}-\d{2}-\d{2})\.md", filename)
+            if match:
+                try:
+                    date.fromisoformat(match.group(2))
+                except ValueError:
+                    return None
+                return "memory_entry"
+        if track in FLOW_MEMORY_CATEGORIES and filename == ".gitkeep":
+            return "memory_gitkeep"
+        return None
+    if len(parts) >= 4 and parts[:2] == (".flow", "evidence"):
+        spec_id = parts[2]
+        if _flow_id_is_task(spec_id) is not False:
+            return None
+        tail = parts[3:]
+        if tail == ("run.json",):
+            return "evidence_run"
+        if (
+            len(tail) == 2
+            and tail[0] == "tasks"
+            and tail[1].endswith(".json")
+            and _flow_id_is_task(tail[1][:-5]) is True
+            and tail[1][:-5].rsplit(".", 1)[0] == spec_id
+        ):
+            return "evidence_task"
+        if (
+            len(tail) == 2
+            and tail[0] == "reviews"
+            and tail[1].endswith(".json")
+        ):
+            return "evidence_review"
+        if (
+            len(tail) == 3
+            and tail[0] == "qa"
+            and tail[2] == "receipt.json"
+        ):
+            return "evidence_qa"
+        if (
+            len(tail) == 3
+            and tail[0] == "tests"
+            and _flow_id_is_task(tail[1]) is True
+            and tail[1].rsplit(".", 1)[0] == spec_id
+            and tail[2].endswith(".xml")
+            and len(tail[2]) > 4
+        ):
+            return "evidence_test"
+        return None
+    if (
+        len(parts) == 5
+        and parts[:2] == (".flow", "artifacts")
+        and _flow_id_is_task(parts[2]) is False
+        and parts[3] == "pr-cognitive-aid"
+        and parts[4].endswith(".json")
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}", parts[4][:-5])
+    ):
+        return "artifact"
     return {
         ".flow/tmp/base_commit": "base_commit",
         ".flow/tmp/spec_base": "spec_base",
     }.get(path)
+
+
+def _flow_json(path: str, content: bytes, label: str) -> dict[str, Any]:
+    if len(content) > MAX_INERT_FLOW_BYTES:
+        raise ProvenanceError(f"{label} exceeds the inert Flow content limit: {path}")
+    try:
+        document = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProvenanceError(f"{label} is invalid JSON: {path}") from exc
+    if not isinstance(document, dict):
+        raise ProvenanceError(f"{label} must be a JSON object: {path}")
+    return document
+
+
+def _memory_frontmatter(path: str, content: bytes) -> tuple[str, dict[str, str]]:
+    if len(content) > MAX_INERT_FLOW_BYTES:
+        raise ProvenanceError(f"Flow memory entry exceeds the content limit: {path}")
+    try:
+        lines = content.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ProvenanceError(f"Flow memory entry is not UTF-8: {path}") from exc
+    if not lines or lines[0] != "---":
+        raise ProvenanceError(f"Flow memory entry has no frontmatter: {path}")
+    try:
+        closing = lines.index("---", 1)
+    except ValueError as exc:
+        raise ProvenanceError(f"Flow memory entry has incomplete frontmatter: {path}") from exc
+    fields: dict[str, str] = {}
+    required_identity = {"title", "date", "track", "category"}
+    for line in lines[1:closing]:
+        if not line or line[0].isspace() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"(title|date|track|category):[ \t]*(.*)", line)
+        if match is None:
+            continue
+        key, value = match.groups()
+        if key in fields:
+            raise ProvenanceError(f"Flow memory entry repeats identity frontmatter: {path}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        fields[key] = value
+    if required_identity - set(fields):
+        raise ProvenanceError(f"Flow memory entry is missing required identity: {path}")
+    return lines[closing + 1] if closing + 1 < len(lines) else "", fields
+
+
+def _validate_cognitive_aid(path: str, document: dict[str, Any]) -> None:
+    """Use Flow's canonical cognitive-aid validator instead of duplicating its schema."""
+    module = sys.modules.get("__main__")
+    validator = getattr(module, "validate_pr_cognitive_aid", None)
+    if not callable(validator):
+        module = sys.modules.get("flowctl")
+        validator = getattr(module, "validate_pr_cognitive_aid", None)
+    if not callable(validator):
+        try:
+            import flowctl as module
+        except ImportError as exc:
+            raise ProvenanceError(
+                "Flow cognitive-aid validator is unavailable for coordinator artifact"
+            ) from exc
+        validator = getattr(module, "validate_pr_cognitive_aid", None)
+    if not callable(validator):
+        raise ProvenanceError(
+            "Flow cognitive-aid validator is unavailable for coordinator artifact"
+        )
+    spec_id = PurePosixPath(path).parts[2]
+    try:
+        validator(document, expected_spec_id=spec_id)
+    except ValueError as exc:
+        raise ProvenanceError(
+            f"Flow artifact does not satisfy its content contract: {path}: {exc}"
+        ) from exc
+
+
+def _validate_inert_flow_content(
+    kind: str, path: str, content: bytes, mode: int
+) -> None:
+    if mode & 0o111:
+        raise ProvenanceError(f"coordinator file is executable: {path}")
+    if len(content) > MAX_INERT_FLOW_BYTES and kind != "artifact":
+        raise ProvenanceError(f"coordinator file exceeds the inert Flow content limit: {path}")
+    if b"\x00" in content:
+        raise ProvenanceError(f"coordinator Flow file is binary: {path}")
+    if kind == "memory_gitkeep":
+        if content:
+            raise ProvenanceError(f"Flow memory .gitkeep must be empty: {path}")
+        return
+    if kind in {"memory_readme"}:
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ProvenanceError(f"Flow memory document is not UTF-8: {path}") from exc
+        return
+    if kind == "memory_entry":
+        _, fields = _memory_frontmatter(path, content)
+        parts = PurePosixPath(path).parts
+        match = re.fullmatch(r".+-(\d{4}-\d{2}-\d{2})\.md", parts[4])
+        required = {"title", "date", "track", "category"}
+        if (
+            match is None
+            or required - set(fields)
+            or not fields["title"]
+            or fields["date"] != match.group(1)
+            or fields["track"] != parts[2]
+            or fields["category"] != parts[3]
+        ):
+            raise ProvenanceError(f"Flow memory entry does not match its path contract: {path}")
+        try:
+            date.fromisoformat(fields["date"])
+        except ValueError as exc:
+            raise ProvenanceError(f"Flow memory entry has an invalid date: {path}") from exc
+        return
+    if kind in {"evidence_test"}:
+        if len(content) > MAX_INERT_FLOW_BYTES:
+            raise ProvenanceError(f"Flow test report exceeds the content limit: {path}")
+        try:
+            root = ElementTree.fromstring(content)
+        except ElementTree.ParseError as exc:
+            raise ProvenanceError(f"Flow test report is invalid XML: {path}") from exc
+        if root.tag.rsplit("}", 1)[-1] not in {"testsuite", "testsuites"}:
+            raise ProvenanceError(f"Flow test report has an unsupported XML root: {path}")
+        return
+    if kind in {"evidence_run", "evidence_task", "evidence_review", "evidence_qa"}:
+        document = _flow_json(path, content, "Flow evidence")
+        parts = PurePosixPath(path).parts
+        if kind == "evidence_task" and document.get("id") != parts[4][:-5]:
+            raise ProvenanceError(f"Flow task evidence ID does not match its path: {path}")
+        if kind in {"evidence_review", "evidence_qa"}:
+            receipt_id = document.get("id")
+            receipt_type = document.get("type")
+            if (
+                not isinstance(receipt_id, str)
+                or _flow_id_is_task(receipt_id) is None
+                or not isinstance(receipt_type, str)
+                or receipt_type not in FLOW_EVIDENCE_RECEIPT_TYPES
+                or not isinstance(document.get("verdict"), str)
+            ):
+                raise ProvenanceError(f"Flow receipt has an invalid content contract: {path}")
+            if kind == "evidence_qa" and receipt_type != "qa_verdict":
+                raise ProvenanceError(f"Flow QA evidence must contain a qa_verdict: {path}")
+            if kind == "evidence_review":
+                expected_suffix = f"-{receipt_type}-{receipt_id}.json"
+                if not PurePosixPath(path).name.endswith(expected_suffix):
+                    raise ProvenanceError(f"Flow review evidence ID does not match its path: {path}")
+        return
+    if kind == "artifact":
+        if len(content) > MAX_COGNITIVE_AID_BYTES:
+            raise ProvenanceError(f"Flow artifact exceeds the content limit: {path}")
+        document = _flow_json(path, content, "Flow artifact")
+        _validate_cognitive_aid(path, document)
+        return
 
 
 def _parse_file_change(
@@ -562,16 +825,17 @@ def _summarize_activity(
 
 
 def _summarize_thread(
-    client: Any, thread: Mapping[str, Any], root: Path
+    client: Any, thread: Mapping[str, Any], path_root: Path
 ) -> dict[str, Any]:
     thread_id = _string(thread.get("id"), "thread ID")
-    cwd = _string(thread.get("cwd"), "thread cwd")
+    cwd_raw = _string(thread.get("cwd"), "thread cwd")
     try:
-        cwd = str(Path(cwd).resolve(strict=True))
+        cwd_path = Path(cwd_raw).resolve(strict=True)
     except OSError as exc:
-        raise ProvenanceError(f"thread cwd is unavailable: {cwd}") from exc
-    if not Path(cwd).is_dir():
-        raise ProvenanceError(f"thread cwd is not a directory: {cwd}")
+        raise ProvenanceError(f"thread cwd is unavailable: {cwd_raw}") from exc
+    if not cwd_path.is_dir():
+        raise ProvenanceError(f"thread cwd is not a directory: {cwd_raw}")
+    cwd = str(cwd_path)
     seen_turns: set[str] = set()
     items: list[dict[str, Any]] = []
     file_changes: list[FileChange] = []
@@ -614,7 +878,9 @@ def _summarize_thread(
                     raise ProvenanceError("agentMessage text has an unsupported type")
                 has_message = has_message or bool(text)
             elif item_type == "fileChange":
-                change = _parse_file_change(item, thread_id, turn_id, order, cwd, root)
+                change = _parse_file_change(
+                    item, thread_id, turn_id, order, cwd, path_root
+                )
                 file_changes.append(change)
                 changes_in_turn.append(change)
             elif item_type == "commandExecution":
@@ -653,6 +919,7 @@ def _summarize_thread(
         raise ProvenanceError(f"thread {thread_id} history contained no turns")
     return {
         "thread": dict(thread), "thread_id": thread_id, "cwd": cwd,
+        "workspace": str(path_root),
         "items": items, "file_changes": file_changes, "commands": commands,
         "opaque_tools": opaque_tools, "activities": activities,
         "spawn_calls": spawn_calls, "file_change_turns": file_change_turns,
@@ -661,7 +928,10 @@ def _summarize_thread(
 
 
 def _validate_inputs(
-    request: Mapping[str, Any], policy: Mapping[str, Any], root: Path
+    request: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    root: Path,
+    common_dir: Path,
 ) -> tuple[str, str, list[dict[str, Any]], dict[str, dict[str, str]]]:
     if set(request) != {"parent_thread", "children", "base_commit", "task"}:
         raise ProvenanceError(
@@ -680,13 +950,17 @@ def _validate_inputs(
     children: list[dict[str, Any]] = []
     child_ids: set[str] = set()
     expected_aliases: dict[str, str] = {}
+    validated_workspaces: dict[str, Path] = {str(root): root}
     for child_value in child_values:
         child = _obj(child_value, "child request")
-        if set(child) - {"thread_id", "expected_files", "reason"} or not {
+        if set(child) - {
+            "thread_id", "expected_files", "reason", "workspace", "task_declaration"
+        } or not {
             "thread_id", "expected_files"
         }.issubset(child):
             raise ProvenanceError(
-                "each child must contain thread_id and expected_files, with optional reason"
+                "each child must contain thread_id and expected_files, with optional "
+                "reason, workspace, and task_declaration"
             )
         child_id = _string(child.get("thread_id"), "child thread_id")
         if child_id == parent_id or child_id in child_ids:
@@ -695,12 +969,16 @@ def _validate_inputs(
         values = child.get("expected_files")
         if not isinstance(values, list) or not values:
             raise ProvenanceError(f"child {child_id} must include expected_files")
-        paths = [
-            _resolve_path(
-                value, root, str(root), "expected file", relative_to_root=True
+        paths = []
+        for value in values:
+            path_value = _string(value, "expected file")
+            if Path(path_value).is_absolute():
+                raise ProvenanceError("expected files must be repository-relative paths")
+            paths.append(
+                _resolve_path(
+                    path_value, root, str(root), "expected file", relative_to_root=True
+                )
             )
-            for value in values
-        ]
         if len(paths) != len(set(paths)):
             raise ProvenanceError(f"child {child_id} repeats an expected file")
         for path in paths:
@@ -712,6 +990,30 @@ def _validate_inputs(
                 )
             expected_aliases[alias] = path
         normalized_child = {"thread_id": child_id, "expected_files": sorted(paths)}
+        task_declaration = _string(
+            child.get("task_declaration", task),
+            f"task_declaration for child {child_id}",
+        )
+        if (
+            task_declaration != task_declaration.strip()
+            or "\n" in task_declaration
+            or "\r" in task_declaration
+        ):
+            raise ProvenanceError(
+                f"task_declaration for child {child_id} must be a single exact native declaration line"
+            )
+        normalized_child["task_declaration"] = task_declaration
+        workspace_value = child.get("workspace")
+        if "workspace" not in child:
+            workspace = root
+        else:
+            raw_workspace = _string(workspace_value, f"workspace for child {child_id}")
+            if raw_workspace not in validated_workspaces:
+                validated_workspaces[raw_workspace] = _validate_workspace(
+                    raw_workspace, root, common_dir
+                )
+            workspace = validated_workspaces[raw_workspace]
+        normalized_child["workspace"] = str(workspace)
         if "reason" in child:
             reason = _string(child["reason"], f"reason for child {child_id}")
             if "\n" in reason or "\r" in reason:
@@ -720,6 +1022,10 @@ def _validate_inputs(
                 )
             normalized_child["reason"] = reason
         children.append(normalized_child)
+    if not any(child["task_declaration"] == task for child in children):
+        raise ProvenanceError(
+            "the complete child set must include a verified child for the current task"
+        )
     roles: dict[str, dict[str, str]] = {}
     for role_value, policy_value in policy.items():
         role = _string(role_value, "policy role")
@@ -832,20 +1138,61 @@ def _validate_legacy_grafts(root: Path) -> None:
         )
 
 
+def _repository_common_dir(root: Path) -> Path:
+    raw = _git(root, "rev-parse", "--git-common-dir").decode("utf-8").strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = root / path
+    try:
+        common_dir = path.resolve(strict=True)
+    except OSError as exc:
+        raise ProvenanceError(f"Git common directory is unavailable: {exc}") from exc
+    if not common_dir.is_dir():
+        raise ProvenanceError("Git common directory is not a directory")
+    return common_dir
+
+
+def _registered_worktrees(root: Path) -> set[str]:
+    output = _git(root, "worktree", "list", "--porcelain", "-z")
+    try:
+        fields = output.decode("utf-8").split("\x00")
+    except UnicodeDecodeError as exc:
+        raise ProvenanceError("Git returned a non-UTF-8 linked worktree path") from exc
+    paths = {
+        field.removeprefix("worktree ")
+        for field in fields
+        if field.startswith("worktree ")
+    }
+    if not paths:
+        raise ProvenanceError("Git did not report any registered worktrees")
+    return paths
+
+
+def _validate_workspace(value: object, root: Path, common_dir: Path) -> Path:
+    workspace = _canonical_directory(value, "child workspace")
+    top_level_raw = _git(workspace, "rev-parse", "--show-toplevel").decode("utf-8").strip()
+    if Path(top_level_raw) != workspace:
+        raise ProvenanceError("child workspace must be the canonical Git worktree root")
+    if _repository_common_dir(workspace) != common_dir:
+        raise ProvenanceError("child workspace belongs to a different Git repository")
+    registered = _registered_worktrees(root)
+    if str(workspace) not in registered:
+        raise ProvenanceError("child workspace is not a registered linked worktree")
+    return workspace
+
+
 def _prepare_repository(
     repo_root: str | os.PathLike[str],
 ) -> tuple[Path, str, str]:
     try:
         supplied = Path(os.path.expanduser(os.fspath(repo_root)))
-        if supplied.is_symlink():
-            raise ProvenanceError("repo_root cannot be a symlink")
-        root = supplied.resolve(strict=True)
+        if not supplied.is_absolute():
+            supplied = Path.cwd() / supplied
+        root = _canonical_directory(str(supplied), "repo_root")
     except (OSError, TypeError) as exc:
         raise ProvenanceError(f"repo_root is unavailable: {exc}") from exc
-    if not root.is_dir():
-        raise ProvenanceError("repo_root must be a directory")
     top_level = _git(root, "rev-parse", "--show-toplevel").decode("utf-8").strip()
-    if Path(top_level).resolve(strict=True) != root:
+    if Path(top_level) != root:
         raise ProvenanceError("repo_root must be the Git worktree root")
     _validate_index_flags(root)
     _validate_legacy_grafts(root)
@@ -919,7 +1266,9 @@ def _git_index_entry(root: Path, path: str) -> tuple[bytes, int] | None:
     return parsed[0]
 
 
-def _read_disk_state(root: Path, path: str) -> tuple[bytes, int] | None:
+def _read_disk_state(
+    root: Path, path: str, *, max_bytes: int | None = None
+) -> tuple[bytes, int] | None:
     target = _assert_safe_path(root, PurePosixPath(path))
     try:
         info = target.lstat()
@@ -929,10 +1278,14 @@ def _read_disk_state(root: Path, path: str) -> tuple[bytes, int] | None:
         raise ProvenanceError(f"candidate path is not a regular file: {path}")
     if info.st_nlink != 1:
         raise ProvenanceError(f"candidate file is hard-linked: {path}")
+    if max_bytes is not None and info.st_size > max_bytes:
+        raise ProvenanceError(f"candidate file exceeds its content limit: {path}")
     try:
         content = target.read_bytes()
     except OSError as exc:
         raise ProvenanceError(f"cannot read candidate file {path}: {exc}") from exc
+    if max_bytes is not None and len(content) > max_bytes:
+        raise ProvenanceError(f"candidate file exceeds its content limit: {path}")
     mode = 0o100755 if info.st_mode & 0o111 else 0o100644
     return content, mode
 
@@ -1138,6 +1491,9 @@ def _validate_coordinator_file(
                 "coordinator base_commit marker differs from requested base"
             )
         return
+    if kind not in {"spec", "task"}:
+        _validate_inert_flow_content(kind, path, content, state[1])
+        return
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -1163,10 +1519,16 @@ def _candidate_coordinator_state(
 ) -> dict[str, tuple[bytes, int] | None]:
     paths = {path for path in changed if _coordination_kind(path) is not None}
     paths.update(native_state)
-    for marker in (".flow/tmp/base_commit", ".flow/tmp/spec_base"):
-        if _read_disk_state(root, marker) is not None:
-            paths.add(marker)
-    state = {path: _read_disk_state(root, path) for path in sorted(paths)}
+    state = {
+        path: _read_disk_state(
+            root,
+            path,
+            max_bytes=MAX_COGNITIVE_AID_BYTES
+            if _coordination_kind(path) == "artifact"
+            else None,
+        )
+        for path in sorted(paths)
+    }
     for path, value in state.items():
         _validate_coordinator_file(root, base, path, value)
     return state
@@ -1282,14 +1644,19 @@ def _validate_candidate(
             raise ProvenanceError(
                 f"disk candidate differs from replayed native changes: {path}"
             )
-        for label, candidate in (("HEAD", head_state), ("index", index_state)):
-            if not (
-                _state_equal(candidate, base_state)
-                or _state_equal(candidate, expected)
-            ):
-                raise ProvenanceError(
-                    f"{label} candidate has an unexplained intermediate state: {path}"
-                )
+        if path in coordinator_paths:
+            for candidate in (head_state, index_state):
+                if candidate is not None:
+                    _validate_coordinator_file(root, base, path, candidate)
+        else:
+            for label, candidate in (("HEAD", head_state), ("index", index_state)):
+                if not (
+                    _state_equal(candidate, base_state)
+                    or _state_equal(candidate, expected)
+                ):
+                    raise ProvenanceError(
+                        f"{label} candidate has an unexplained intermediate state: {path}"
+                    )
         if (
             path in delegated_paths
             and not _state_equal(expected, base_state)
@@ -1569,6 +1936,9 @@ def _verify_child(
         )
     result = {
         "threadId": child_id,
+        "taskDeclaration": request_child["task_declaration"],
+        "workspace": summary["workspace"],
+        "nativeCwd": summary["cwd"],
         "role": role,
         "configured": {
             "model": model,
@@ -1626,7 +1996,10 @@ def verify_native(
     if not isinstance(request, Mapping) or not isinstance(policy, Mapping):
         raise ProvenanceError("request and policy must be mappings")
     root, root_text, head = _prepare_repository(repo_root)
-    parent_id, task, children, roles = _validate_inputs(request, policy, root)
+    common_dir = _repository_common_dir(root)
+    parent_id, task, children, roles = _validate_inputs(
+        request, policy, root, common_dir
+    )
     base = _resolve_commit(root, request["base_commit"])
     owned_client = client is None
     if owned_client:
@@ -1653,7 +2026,7 @@ def verify_native(
             child_thread = _metadata(active_client, child_id)
             child_threads[child_id] = child_thread
             child_summaries[child_id] = _summarize_thread(
-                active_client, child_thread, root
+                active_client, child_thread, Path(child["workspace"])
             )
         summaries = [parent_summary, *child_summaries.values()]
         _validate_unique_native_ids(summaries)
@@ -1663,7 +2036,11 @@ def verify_native(
         for child in children:
             child_id = child["thread_id"]
             result, relation = _verify_child(
-                child, child_summaries[child_id], parent_summary, roles, task
+                child,
+                child_summaries[child_id],
+                parent_summary,
+                roles,
+                child["task_declaration"],
             )
             verified_children[child_id] = result
             relations[child_id] = relation
@@ -1732,7 +2109,11 @@ def verify_native(
         payload: dict[str, Any] = {
             "schema": "flow-next/codex-native-provenance/v1",
             "task": task,
-            "repository": {"root": root_text, "head": head},
+            "repository": {
+                "root": root_text,
+                "commonDir": str(common_dir),
+                "head": head,
+            },
             "baseCommit": base,
             "parentThreadId": parent_id,
             "parentNativeEvidence": {

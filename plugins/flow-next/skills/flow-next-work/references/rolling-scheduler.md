@@ -214,6 +214,12 @@ as written there:
   returns the parallel handover. Review and completion are conductor-owned
   for every backend (3d) - the conductor RECORDS each task's resolved
   `REVIEW_MODE` at dispatch and applies it itself after integration.
+- With native provenance enabled, each task's completion request covers the
+  full explicit union of native children whose changes are integrated since
+  their common immutable base, including earlier rolling admissions. Preserve
+  each child's assigned files and its `workspace` and `task_declaration`
+  bindings as specified in `implementation-provenance.md`; sibling application
+  files are never silently exempted.
 - **Notes pointer line:** when `.flow/tmp/notes_dir.<RUN_ID>` exists (the
   `RUN_ID` recorded at 3.0), re-read the path
   (`NOTES_DIR="$(cat .flow/tmp/notes_dir.<RUN_ID>)"` - never assume the 3.0

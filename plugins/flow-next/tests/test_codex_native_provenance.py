@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from typing import Any
 from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import flowctl_codex_provenance as native_provenance
@@ -202,6 +204,224 @@ class NativeProvenanceTests(unittest.TestCase):
         self.base = _run(self.root, "rev-parse", "HEAD")
         self.request["base_commit"] = self.base
 
+    def _initialize_flow_memory(self) -> Path:
+        flowctl = SCRIPT_DIR / "flowctl"
+        for args in (
+            ["init", "--json"],
+            ["config", "set", "memory.enabled", "true", "--json"],
+            ["memory", "init", "--json"],
+        ):
+            result = subprocess.run(
+                [str(flowctl), *args],
+                cwd=self.root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.root / ".gitignore").write_text(
+            ".flow/artifacts/*/pr-cognitive-aid/\n", encoding="utf-8"
+        )
+        _run(self.root, "add", ".flow", ".gitignore")
+        _run(self.root, "commit", "-qm", "Flow memory baseline")
+        self.base = _run(self.root, "rev-parse", "HEAD")
+        self.request["base_commit"] = self.base
+        return self.root / ".flow" / "memory"
+
+    def test_linked_child_workspace_maps_native_paths_to_integrated_root(self) -> None:
+        worktree = self.root.parent / f"{self.root.name}-worker"
+        _run(self.root, "worktree", "add", "--detach", str(worktree), self.base)
+        try:
+            self.request["children"][0]["workspace"] = str(worktree)
+            client = self._client()
+            child = client.threads[CHILD_ID]
+            child["thread"]["cwd"] = str(self.root.parent)
+            for turn in child["turns"]:
+                for item in turn["items"]:
+                    if item.get("type") == "fileChange":
+                        item["changes"][0]["path"] = str(worktree / "delegated.txt")
+            (worktree / "delegated.txt").write_text(
+                "delegated implementation\n", encoding="utf-8"
+            )
+            (self.root / "delegated.txt").write_text(
+                "delegated implementation\n", encoding="utf-8"
+            )
+
+            receipt = self._verify(client)
+
+            self.assertEqual(receipt["children"][0]["workspace"], str(worktree))
+            self.assertEqual(receipt["children"][0]["nativeCwd"], str(self.root.parent))
+            self.assertEqual(receipt["candidateFiles"][0]["path"], "delegated.txt")
+        finally:
+            subprocess.run(
+                ["git", "-C", str(self.root), "worktree", "remove", "--force", str(worktree)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_declared_workspace_rejects_absolute_changes_from_another_worktree(self) -> None:
+        workspace = self.root.parent / f"{self.root.name}-workspace-binding"
+        other = self.root.parent / f"{self.root.name}-other-worktree"
+        _run(self.root, "worktree", "add", "--detach", str(workspace), self.base)
+        _run(self.root, "worktree", "add", "--detach", str(other), self.base)
+        try:
+            self.request["children"][0]["workspace"] = str(workspace)
+            client = self._client()
+            child = client.threads[CHILD_ID]
+            child["thread"]["cwd"] = str(self.root.parent)
+            for turn in child["turns"]:
+                for item in turn["items"]:
+                    if item.get("type") == "fileChange":
+                        item["changes"][0]["path"] = str(other / "delegated.txt")
+            (self.root / "delegated.txt").write_text(
+                "delegated implementation\n", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(VerificationError, "resolves outside the explicit repository root"):
+                self._verify(client)
+        finally:
+            subprocess.run(
+                ["git", "-C", str(self.root), "worktree", "remove", "--force", str(other)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["git", "-C", str(self.root), "worktree", "remove", "--force", str(workspace)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    def test_workspace_symlink_and_unrelated_repository_are_rejected(self) -> None:
+        worktree = self.root.parent / f"{self.root.name}-worker"
+        unrelated = self.root.parent / f"{self.root.name}-unrelated"
+        alias = self.root.parent / f"{self.root.name}-worker-alias"
+        _run(self.root, "worktree", "add", "--detach", str(worktree), self.base)
+        try:
+            alias.symlink_to(worktree, target_is_directory=True)
+            self.request["children"][0]["workspace"] = str(alias)
+            with self.assertRaisesRegex(VerificationError, "canonical path|symlink"):
+                self._verify()
+
+            alias.unlink()
+            subprocess.run(
+                ["git", "clone", "--quiet", "--shared", str(self.root), str(unrelated)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.request["children"][0]["workspace"] = str(unrelated)
+            with self.assertRaisesRegex(
+                VerificationError, "different Git repository|registered linked worktree"
+            ):
+                self._verify()
+
+            self.request["children"][0]["workspace"] = "../forged-worktree"
+            with self.assertRaisesRegex(VerificationError, "absolute canonical path"):
+                self._verify()
+        finally:
+            subprocess.run(
+                ["git", "-C", str(self.root), "worktree", "remove", "--force", str(worktree)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if alias.is_symlink():
+                alias.unlink()
+            if unrelated.exists():
+                shutil.rmtree(unrelated)
+
+    def test_two_task_wave_binds_each_native_child_to_its_declaration(self) -> None:
+        second_task = "fn-1-native-provenance.2"
+        first_id, second_id = "child-wave-first", "child-wave-second"
+        first_path = self.root / "first-output.txt"
+        second_path = self.root / "second-output.txt"
+        first_path.write_text("first output\n", encoding="utf-8")
+        second_path.write_text("second output\n", encoding="utf-8")
+        parent_items: list[dict[str, Any]] = [
+            self._task_item(text=f"Implementation task: {self.request['task']}"),
+            {
+                "id": "wave-first-start", "type": "subAgentActivity",
+                "agentThreadId": first_id, "agentPath": "implementer", "kind": "started",
+            },
+            {
+                "id": "wave-first-complete", "type": "subAgentActivity",
+                "agentThreadId": first_id, "agentPath": "implementer", "kind": "completed",
+            },
+            self._task_item("wave-second-task", f"Implementation task: {second_task}"),
+            {
+                "id": "wave-second-start", "type": "subAgentActivity",
+                "agentThreadId": second_id, "agentPath": "implementer", "kind": "started",
+            },
+            {
+                "id": "wave-second-complete", "type": "subAgentActivity",
+                "agentThreadId": second_id, "agentPath": "implementer", "kind": "completed",
+            },
+        ]
+
+        def child_thread(thread_id: str, event: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "thread": {
+                    "id": thread_id, "cwd": str(self.root), "historyMode": "legacy",
+                    "status": {"type": "idle"}, "parentThreadId": PARENT_ID,
+                    "agentRole": "implementer", "model": "model-test", "reasoningEffort": "high",
+                },
+                "turns": [{
+                    "id": thread_id + "-turn", "status": "completed",
+                    "items": [event, {"id": thread_id + "-message", "type": "agentMessage", "text": "Done."}],
+                }],
+            }
+
+        client = FixtureClient({
+            PARENT_ID: {
+                "thread": self._thread(PARENT_ID),
+                "turns": [{"id": "parent-turn", "status": "inProgress", "items": parent_items}],
+            },
+            first_id: child_thread(
+                first_id,
+                _file_change("wave-first-file", str(first_path), "add", "first output\n"),
+            ),
+            second_id: child_thread(
+                second_id,
+                _file_change("wave-second-file", str(second_path), "add", "second output\n"),
+            ),
+        })
+        self.request["children"] = [
+            {"thread_id": second_id, "task_declaration": second_task,
+             "expected_files": ["second-output.txt"]},
+            {"thread_id": first_id, "expected_files": ["first-output.txt"]},
+        ]
+
+        receipt = self._verify(client)
+
+        tasks = {child["threadId"]: child["taskDeclaration"] for child in receipt["children"]}
+        self.assertEqual(tasks, {first_id: self.request["task"], second_id: second_task})
+        self.assertEqual(
+            {item["path"] for item in receipt["candidateFiles"]},
+            {"first-output.txt", "second-output.txt"},
+        )
+
+    def test_current_task_must_be_bound_to_one_of_the_verified_children(self) -> None:
+        self.request["children"][0]["task_declaration"] = "fn-1-native-provenance.2"
+        with self.assertRaisesRegex(VerificationError, "include a verified child for the current task"):
+            self._verify()
+
+    def test_standalone_task_declaration_may_be_any_exact_single_line(self) -> None:
+        self.request["task"] = "Standalone native implementation probe"
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+
+        receipt = self._verify(self._client())
+
+        self.assertEqual(
+            receipt["children"][0]["taskDeclaration"],
+            "Standalone native implementation probe",
+        )
+
     def test_delete_then_add_replays_in_native_order_and_binds_receipt(self) -> None:
         (self.root / "delegated.txt").write_text(
             "delegated implementation\n", encoding="utf-8"
@@ -243,6 +463,282 @@ class NativeProvenanceTests(unittest.TestCase):
         self.assertIn(f".flow/specs/{spec_id}.md", coordinator_paths)
         self.assertIn(f".flow/tasks/{task_id}.json", coordinator_paths)
         self.assertIn(".flow/tmp/base_commit", coordinator_paths)
+
+    def test_stale_ignored_base_marker_without_current_evidence_is_not_read(self) -> None:
+        ignore_path = self.root / ".gitignore"
+        ignore_path.write_text(".flow/tmp/base_commit\n", encoding="utf-8")
+        _run(self.root, "add", ".gitignore")
+        _run(self.root, "commit", "-qm", "ignore local Flow base marker")
+        self.base = _run(self.root, "rev-parse", "HEAD")
+        self.request["base_commit"] = self.base
+        marker = self.root / ".flow" / "tmp" / "base_commit"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("not-a-current-git-commit\n", encoding="ascii")
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+
+        receipt = self._verify()
+
+        self.assertNotIn(
+            ".flow/tmp/base_commit",
+            {item["path"] for item in receipt["coordinatorFiles"]},
+        )
+
+    def test_natively_recorded_current_base_marker_is_checked_against_request(self) -> None:
+        ignore_path = self.root / ".gitignore"
+        ignore_path.write_text(".flow/tmp/base_commit\n", encoding="utf-8")
+        _run(self.root, "add", ".gitignore")
+        _run(self.root, "commit", "-qm", "ignore local Flow base marker")
+        self.base = _run(self.root, "rev-parse", "HEAD")
+        self.request["base_commit"] = self.base
+        (self.root / "anchor.txt").write_text("advance HEAD\n", encoding="utf-8")
+        _run(self.root, "add", "anchor.txt")
+        _run(self.root, "commit", "-qm", "advance candidate beyond requested base")
+        current_head = _run(self.root, "rev-parse", "HEAD")
+        marker = self.root / ".flow" / "tmp" / "base_commit"
+        marker.parent.mkdir(parents=True)
+        marker_content = current_head + "\n"
+        marker.write_text(marker_content, encoding="ascii")
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+        parent_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("forged-current-base-marker", str(marker), "add", marker_content),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+
+        with self.assertRaisesRegex(
+            VerificationError, "base_commit marker differs from requested base"
+        ):
+            self._verify(self._client(parent_items=parent_items))
+
+    def test_valid_committed_and_staged_flow_json_intermediate_states_are_allowed(self) -> None:
+        spec_id = "fn-1-native-provenance"
+        spec_path = self.root / ".flow" / "specs" / f"{spec_id}.json"
+        spec_path.parent.mkdir(parents=True)
+        base_content = json.dumps({"id": spec_id, "version": 0}, sort_keys=True) + "\n"
+        spec_path.write_text(base_content, encoding="utf-8")
+        _run(self.root, "add", str(spec_path.relative_to(self.root)))
+        _run(self.root, "commit", "-qm", "valid Flow spec baseline")
+        self.base = _run(self.root, "rev-parse", "HEAD")
+        self.request["base_commit"] = self.base
+
+        head_content = json.dumps({"id": spec_id, "version": 1}, sort_keys=True) + "\n"
+        spec_path.write_text(head_content, encoding="utf-8")
+        _run(self.root, "add", str(spec_path.relative_to(self.root)))
+        _run(self.root, "commit", "-qm", "valid committed Flow intermediate")
+
+        index_content = json.dumps({"id": spec_id, "version": 2}, sort_keys=True) + "\n"
+        spec_path.write_text(index_content, encoding="utf-8")
+        _run(self.root, "add", str(spec_path.relative_to(self.root)))
+        final_content = json.dumps({"id": spec_id, "version": 3}, sort_keys=True) + "\n"
+        spec_path.write_text(final_content, encoding="utf-8")
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+        patch = f"@@ -1 +1 @@\n-{base_content}+{final_content}"
+        parent_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("spec-intermediate-update", str(spec_path), "update", patch),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+
+        receipt = self._verify(self._client(parent_items=parent_items))
+
+        self.assertIn(
+            f".flow/specs/{spec_id}.json",
+            {item["path"] for item in receipt["coordinatorFiles"]},
+        )
+
+    def test_flowctl_memory_add_with_tags_and_multiline_body_is_allowed(self) -> None:
+        self._initialize_flow_memory()
+        body_path = self.root.parent / f"{self.root.name}-memory-body.md"
+        body_path.write_text(
+            "Native memory provenance stays bounded.\n\n"
+            "The body can include multiple paragraphs.\n",
+            encoding="utf-8",
+        )
+        try:
+            result = subprocess.run(
+                [
+                    str(SCRIPT_DIR / "flowctl"), "memory", "add",
+                    "--track", "knowledge", "--category", "workflow",
+                    "--title", "Native provenance capture",
+                    "--tags", "native,provenance", "--body-file", str(body_path),
+                    "--json",
+                ],
+                cwd=self.root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            memory_result = json.loads(result.stdout)
+            memory_path = Path(memory_result["path"])
+            self.assertTrue(memory_path.is_file())
+            memory_content = memory_path.read_text(encoding="utf-8")
+            self.assertIn("tags:", memory_content)
+            self.assertIn("multiple paragraphs", memory_content)
+            (self.root / "delegated.txt").write_text(
+                "delegated implementation\n", encoding="utf-8"
+            )
+            parent_items = [
+                self._task_item(),
+                {"id": "activity-start", "type": "subAgentActivity",
+                 "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+                _file_change(
+                    "memory-add-event", str(memory_path), "add", memory_content
+                ),
+                {"id": "activity-complete", "type": "subAgentActivity",
+                 "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+            ]
+
+            receipt = self._verify(self._client(parent_items=parent_items))
+
+            self.assertIn(
+                memory_path.relative_to(self.root).as_posix(),
+                {item["path"] for item in receipt["coordinatorFiles"]},
+            )
+        finally:
+            body_path.unlink(missing_ok=True)
+
+    def test_malformed_memory_and_mixed_source_or_policy_paths_are_rejected(self) -> None:
+        memory_dir = self._initialize_flow_memory()
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+        malformed_path = (
+            memory_dir / "knowledge" / "workflow" /
+            "native-provenance-2026-10-19.md"
+        )
+        malformed_path.parent.mkdir(parents=True, exist_ok=True)
+        malformed_content = (
+            "---\ntitle: Native provenance\ntrack: knowledge\n"
+            "category: workflow\n---\nbody\n"
+        )
+        malformed_path.write_text(malformed_content, encoding="utf-8")
+        malformed_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("bad-memory-event", str(malformed_path), "add", malformed_content),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+        with self.assertRaisesRegex(VerificationError, "missing required identity"):
+            self._verify(self._client(parent_items=malformed_items))
+
+        malformed_path.unlink()
+        valid_path = (
+            memory_dir / "knowledge" / "workflow" /
+            "native-provenance-2026-10-19.md"
+        )
+        valid_content = (
+            "---\ntitle: Native provenance\ndate: 2026-10-19\n"
+            "track: knowledge\ncategory: workflow\ntags:\n  - native\n"
+            "  - provenance\n---\nbody\n"
+        )
+        valid_path.write_text(valid_content, encoding="utf-8")
+        config_path = self.root / ".flow" / "config.json"
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+        )
+        mixed_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("valid-memory-event", str(valid_path), "add", valid_content),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+        with self.assertRaisesRegex(VerificationError, "unexplained tracked or untracked paths") as raised:
+            self._verify(self._client(parent_items=mixed_items))
+        self.assertIn(".flow/config.json", str(raised.exception))
+
+    def test_native_source_under_cognitive_aid_path_is_rejected(self) -> None:
+        self._initialize_flow_memory()
+        source_path = (
+            self.root / ".flow" / "artifacts" / "fn-1-native-provenance"
+            / "pr-cognitive-aid" / "payload.py"
+        )
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_content = "print('not inert')\n"
+        source_path.write_text(source_content, encoding="utf-8")
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+        parent_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("source-under-artifacts", str(source_path), "add", source_content),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+
+        with self.assertRaisesRegex(VerificationError, "non-inert Flow path"):
+            self._verify(self._client(parent_items=parent_items))
+
+    def test_pr_cognitive_aid_artifact_uses_the_existing_flow_contract(self) -> None:
+        self._initialize_flow_memory()
+        source_path = REPO_ROOT / "plugins/flow-next/tests/fixtures/pr-cognitive-aid/v1/golden.json"
+        artifact = json.loads(source_path.read_text(encoding="utf-8"))
+        spec_id = "fn-1-native-provenance"
+        task_id = spec_id + ".1"
+        head = _run(self.root, "rev-parse", "HEAD")
+
+        def bind_identity(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: bind_identity(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [bind_identity(item) for item in value]
+            if isinstance(value, str):
+                return (
+                    value.replace("fn-136-cognitive-aid.1", task_id)
+                    .replace("fn-136-cognitive-aid", spec_id)
+                    .replace("a" * 40, self.base)
+                    .replace("b" * 40, head)
+                )
+            return value
+
+        artifact = bind_identity(artifact)
+        artifact["baseSha"] = self.base
+        artifact["headSha"] = head
+        artifact_path = (
+            self.root / ".flow" / "artifacts" / spec_id / "pr-cognitive-aid"
+            / f"{artifact['artifactId']}.json"
+        )
+        artifact_path.parent.mkdir(parents=True)
+        artifact_content = json.dumps(
+            artifact, ensure_ascii=False, sort_keys=True, indent=2
+        ) + "\n"
+        artifact_path.write_text(artifact_content, encoding="utf-8")
+        (self.root / "delegated.txt").write_text(
+            "delegated implementation\n", encoding="utf-8"
+        )
+        parent_items = [
+            self._task_item(),
+            {"id": "activity-start", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "started"},
+            _file_change("artifact-event", str(artifact_path), "add", artifact_content),
+            {"id": "activity-complete", "type": "subAgentActivity",
+             "agentThreadId": CHILD_ID, "agentPath": "implementer", "kind": "completed"},
+        ]
+
+        receipt = self._verify(self._client(parent_items=parent_items))
+
+        self.assertIn(
+            artifact_path.relative_to(self.root).as_posix(),
+            {item["path"] for item in receipt["coordinatorFiles"]},
+        )
 
     def test_real_flowctl_spec_scaffold_is_accepted_as_coordinator_candidate(self) -> None:
         (self.root / "delegated.txt").write_text(
@@ -888,6 +1384,7 @@ class NativeProvenanceTests(unittest.TestCase):
 
     def test_sequential_overlapping_children_replay_in_native_activity_order(self) -> None:
         first_id, second_id = "child-first", "child-second"
+        second_task = "fn-1-native-provenance.2"
         path = str(self.root / "delegated.txt")
         first_event = _file_change(
             "first-update", path, "update", "@@ -1 +1 @@\n-baseline\n+first\n"
@@ -899,6 +1396,15 @@ class NativeProvenanceTests(unittest.TestCase):
         for event_id, child_id, kind in (
             ("first-start", first_id, "started"),
             ("first-complete", first_id, "completed"),
+        ):
+            parent_items.append({
+                "id": event_id, "type": "subAgentActivity", "agentThreadId": child_id,
+                "agentPath": "implementer", "kind": kind,
+            })
+        parent_items.append(
+            self._task_item("second-task-declaration", f"Implementation task: {second_task}")
+        )
+        for event_id, child_id, kind in (
             ("second-start", second_id, "started"),
             ("second-complete", second_id, "completed"),
         ):
@@ -929,7 +1435,8 @@ class NativeProvenanceTests(unittest.TestCase):
             second_id: child(second_id, second_event),
         })
         self.request["children"] = [
-            {"thread_id": second_id, "expected_files": ["delegated.txt"]},
+            {"thread_id": second_id, "task_declaration": second_task,
+             "expected_files": ["delegated.txt"]},
             {"thread_id": first_id, "expected_files": ["delegated.txt"]},
         ]
         (self.root / "delegated.txt").write_text("second\n", encoding="utf-8")

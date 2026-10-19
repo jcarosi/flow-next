@@ -22,7 +22,9 @@ If no configured role is available, or the host cannot provide supported
 native history, stop before implementation and leave the task incomplete.
 
 Before each native child is started, the coordinator must emit the exact line
-`Implementation task: <canonical task id>` in its native parent history. If
+`Implementation task: <task declaration>` in its native parent history. In a
+Flow task, use that task's canonical id. The shared verifier also supports
+standalone callers whose declaration is any exact, non-empty single line. If
 the selected role has `require_reason: true`, include a concise `reason` in the
 child request and emit the exact line `Escalation reason: <reason>` before the
 child starts. If any role receives a reason, the same exact line must also
@@ -32,9 +34,16 @@ evidence from the current task; never invent one to satisfy the policy.
 Record the task's full base commit before the first implementation child is
 dispatched. Keep the direct parent thread id and each implementation child's
 native thread id from the host metadata. A child’s self-report is not evidence.
-For each child, record the exact repo-relative application paths it was
-assigned to change. Do not include arbitrary commands, broad coordination
-exceptions, or executable content in the request.
+Record the complete set of native implementation children integrated since the
+common immutable base, including children from each wave or rolling handover.
+For each child, record its exact repo-relative application paths in the
+integrated repository. Include a child-specific `task_declaration` when it was
+assigned a different task; otherwise it defaults to the top-level `task`. The
+parent must have emitted that exact task line before the child started, and the
+complete request must include a verified child for the current task. A child may
+also name its absolute linked-worktree root in `workspace`; keep that worktree
+available and registered until verification finishes. Do not include arbitrary
+commands, broad coordination exceptions, or executable content in the request.
 
 When this policy is active, dispatch even a single owner task to a native
 worker. Have the worker return the task as `in_progress` with its handover;
@@ -47,7 +56,7 @@ use that handover shape.
 
 After integrating all implementation and review-fix commits, complete the
 focused verification for the integrated candidate. Prepare a request with this
-shape, using the canonical task id and full base commit:
+shape, using the current task declaration and full base commit:
 
 ```json
 {
@@ -55,14 +64,22 @@ shape, using the canonical task id and full base commit:
   "children": [
     {
       "thread_id": "<native implementation child thread id>",
-      "expected_files": ["<repo-relative application path>"]
+      "expected_files": ["<integrated-repository-relative application path>"],
+      "task_declaration": "<optional exact child task declaration>",
+      "workspace": "<optional absolute linked-worktree root>"
     }
   ],
   "base_commit": "<full git commit sha>",
-  "task": "<canonical task id>"
+  "task": "<current task declaration>"
 }
 ```
 
+`task_declaration` defaults to the top-level `task`; `workspace` defaults to the
+integrated repository root. A supplied workspace must be a canonical, registered
+linked worktree in the same Git repository. The verifier maps native absolute
+paths from that workspace back to integrated-repository paths and rejects
+symlinks, traversal, aliases, and unrelated clones. Keep each named workspace
+until verification has completed so the native path evidence can be resolved.
 Each child entry may also have a `reason` string. It is required when that
 child's configured role has `require_reason: true`.
 
@@ -95,23 +112,32 @@ standalone checker do not write Flow state. Native verification is opt-in;
 with the setting unset or disabled, existing task completion remains
 compatible and does not require a native request.
 
-The request assigns each child a closed set of repository-relative files. The
-adapter replays supported native text file changes against the base commit and
-compares their bytes and executable mode with the current candidate. It also
-checks the index, `HEAD`, and disk for unexplained intermediate states. Native
-`fileChange` evidence must cover every source path in scope. A command that
-generates a mirror, schema, help file, or other output does not attribute that
-output by itself. If generated paths lack supported native `fileChange`
-events, strict verification rejects them, even when the child generated them
+The request assigns every child a closed set of repository-relative files. The
+adapter replays all included children against the common base in native activity
+order and compares their bytes and executable mode with the current candidate.
+Concurrent children with overlapping paths remain ambiguous and are rejected.
+Native `fileChange` evidence must cover every source path in scope. A command
+that generates a mirror, schema, help file, or other output does not attribute
+that output by itself. If generated paths lack supported native `fileChange`
+events, strict verification rejects them, even when a child generated them
 legitimately. Binary or non-UTF-8 candidate content is unsupported and fails
 closed. Git index states that hide worktree changes, including sparse,
 `skip-worktree`, or `assume-unchanged` entries, may also be refused with a
 diagnostic.
 
-Flow coordinator metadata has a separate narrow classification for inert spec,
-task, and base-marker files. This permits a recorded Flow operation such as
-creating a spec alongside delegated source changes. It does not make arbitrary
-project configuration or generated application output coordinator-owned.
+Flow coordinator metadata has a narrow classification for valid inert spec and
+task files, memory entries and documents, run/task/review/QA evidence, JUnit
+reports, observed or tracked PR cognitive-aid artifacts, and currently evidenced
+base markers. These outputs must stay within their existing Flow path and
+content contracts, be bounded UTF-8 data, and have no executable mode. Valid
+intermediate Flow JSON in `HEAD` or the index can differ from both the common
+base and final disk state;
+application source still must reconcile to its base or fully replayed final
+state. Ignored stale base-marker files are not read unless they have current
+native or tracked evidence. This classification does not cover arbitrary
+`.flow` paths: `.flow/config.json` is policy-bearing and has no inert exemption,
+so configuration implementation must be assigned as delegated application
+work and is rejected when written as unexplained coordinator output.
 
 ## Evidence limits
 
@@ -127,9 +153,19 @@ thread metadata; it does not prove provider identity. Receipt hashes bind the
 serialized evidence against accidental changes. They are not signatures or an
 authenticity claim.
 
+When native provenance is unset or disabled by a valid Flow configuration,
+existing completion behavior remains compatible: caller-supplied opaque
+evidence is preserved and labeled `UNVERIFIED`. When native provenance is
+active, a fresh verified receipt replaces any caller-supplied receipt. Missing,
+unreadable, or malformed policy configuration cannot prove that the setting is
+off, so the gate fails closed in that case.
+
 Only changes visible in the checked Git candidate and supported native history
 can be compared. Ignored files and paths outside the repository are outside the
-candidate scan. Writes that are reverted before checking, identical overwrites,
+candidate scan. PR cognitive-aid artifacts are intentionally ignored by Git, so
+an untracked ignored artifact is not included unless native evidence names it;
+Flow's artifact writer performs its own contract validation before use. Writes
+that are reverted before checking, identical overwrites,
 and external effects that leave no visible candidate change cannot be
 attributed. An expected output that is ignored or absent from Git is rejected.
 The standalone checker reports the candidate it observed and does not prevent
@@ -155,6 +191,7 @@ FLOW_NEXT_CODEX_PROVENANCE_LIVE_CONFIG=/path/to/live-fixtures.json \
 The config supplies `fixture_root`, the installed candidate `flowctl`, a
 `flow` object with `repo_root`, `request`, and `created_spec_paths`, plus a
 `standalone` object with `repo_root`, `request`, `policy`, and the staged
-launcher path. Keep the config, requests, role policy, and native IDs outside
-the repository. Without the environment variable, all live integration cases
-skip.
+launcher path. An optional top-level `worktree` object with `repo_root` and
+`request` exercises real linked-worktree path mapping. Keep the config,
+requests, role policy, and native IDs outside the repository. Without the
+environment variable, all live integration cases skip.

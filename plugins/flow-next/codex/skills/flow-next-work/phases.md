@@ -164,10 +164,12 @@ Done when: `spec chain` reported `eligible: true`, the run is on the branch the 
 `implementation.provenance` is `codex-native`, read
 [references/implementation-provenance.md](references/implementation-provenance.md)
 before claiming or dispatching. It applies to direct single-owner, rolling and
-wave routes; even one task must use a configured native worker and return to
-the conductor for final integration, review and completion. If the policy is
-invalid or config loading reports an error, stop before implementation and
-leave the task incomplete.
+wave routes; even one task must use a configured native worker, return with the
+task still `in_progress`, and leave integration, review, provenance revalidation
+and `flowctl done` to the conductor. The native child returns a complete
+handover and never completes its own task while its thread is active. If the
+policy is invalid or config loading reports an error, stop before implementation
+and leave the task incomplete.
 
 **Several tasks, a worker wanted, or native provenance enabled:** read [references/multi-task.md](references/multi-task.md)
 and follow it as this phase. That covers a spec with more than one open task, and a single task

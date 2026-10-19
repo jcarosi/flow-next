@@ -179,12 +179,21 @@ Before spawning, apply [references/judge-tier.md](judge-tier.md) once for this t
 
 Use the Task tool to spawn an implementation worker. When native provenance is
 enabled, use an available configured native role suitable for this task and
-pass that role's configured model and effort. Create an isolated mutable
-workspace even for a one-task run, set `PARALLEL_WAVE: true`, and have the
-worker return in progress so the conductor can integrate, review and complete
-the task. Read [implementation-provenance.md](implementation-provenance.md)
-for the request and final-check contract. Otherwise preserve the existing
-single-worker route. For a multi-task wave, create one isolated mutable
+pass that role's exact configured name, model and effort. Create an isolated
+mutable workspace even for a one-task run, set `PARALLEL_WAVE: true`, and have
+the native child return a complete handover with the task still `in_progress`.
+The native child does not run `flowctl done`; the conductor integrates, reviews
+and completes the task after the child has returned. For each child request,
+use optional `workspace` for that child's absolute linked-worktree root (the
+path-mapping base; omission means the integrated repo root), and optional
+`task_declaration` for its exact
+`Implementation task:` value (default: the request's top-level `task`). See
+[implementation-provenance.md](implementation-provenance.md) for the full
+request contract. In a wave or rolling run, each request covers the full
+explicit union of native children
+whose changes are present since their common immutable base, including sibling
+tasks; keep each child's assigned files explicit. Otherwise preserve the
+existing single-worker route. For a multi-task wave, create one isolated mutable
 workspace and task-unique summary/evidence paths per worker, then dispatch the
 selected workers concurrently. On every route, choose and pass absolute,
 task-unique `HANDOVER_SUMMARY` and `HANDOVER_EVIDENCE` paths before dispatch;
@@ -265,9 +274,12 @@ behind.
 
 `BASELINE_HANDOFF` is optional. The conductor MAY pass it only when ALL hold: the prior task in this run reached done with its Phase 5 Verify green over the SAME Quick commands, HEAD has not moved since except by commits changing only `.flow/` paths, and the new task's declared Touches do not intersect files changed since that verification. Conductor judgment on stated facts; when in doubt, omit the line. On the wave route the first task receives no handoff. The rolling route instead runs a green spec-base baseline before its first admission and may hand that baseline to the first batch under the same `.flow/`-only rule. Check every intervening commit with `git log --format= --name-only <verified-sha>..HEAD`; any non-`.flow/` path invalidates the handoff, including changes later reverted.
 
-Set `PARALLEL_WAVE: true` for a concurrently dispatched multi-task wave AND
-for a reviewer-overlap dispatch (the one-task wave — the overlapped
-worker must return the parallel handover, never self-complete).
+Set `PARALLEL_WAVE: true` for a concurrently dispatched multi-task wave, a
+reviewer-overlap dispatch (the one-task wave — the overlapped worker must
+return the parallel handover, never self-complete), and every native-provenance
+handover, including a one-task run. The native child returns the complete
+handover with the task still `in_progress`; it never runs `flowctl done` while
+its own thread is active.
 Those workers implement, test, commit, and return their workspace, commits, and
 the exact handover paths. They do **not** call `flowctl done`, project tracker
 state, invoke plan-sync, run impl-review, or integrate their own commit. This

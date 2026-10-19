@@ -76,6 +76,9 @@ class _Repo(unittest.TestCase):
         update(config)
         path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
+    def set_raw_config_text(self, contents: str) -> None:
+        (self.root / ".flow" / "config.json").write_text(contents, encoding="utf-8")
+
     def request(self, **overrides) -> dict:
         request = {
             "parent_thread": "native-parent-thread",
@@ -162,12 +165,57 @@ class _Repo(unittest.TestCase):
 
 class NativeProvenanceGateTest(_Repo):
     def test_off_mode_keeps_existing_done_behavior_and_recognizes_the_key(self) -> None:
-        marker = {"caller_note": "unverified by design while disabled"}
+        self.set_raw_config(
+            lambda config: config.update(
+                implementation={"provenance": "off", "roles": {}}
+            )
+        )
+        marker = {
+            "caller_note": "opaque while disabled",
+            "receipt": {"receipt_sha256": "f" * 64},
+        }
         result = self.done_cli(self.evidence(marker))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("unknown evidence key", result.stderr)
         self.assertEqual(self.status(), "done")
         self.assertNotIn("stage: native-provenance", (self.root / ".flow/tasks" / f"{TASK_ID}.md").read_text(encoding="utf-8"))
+        runtime = json.loads(
+            (self.state / "tasks" / f"{TASK_ID}.state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(runtime["evidence"]["native_provenance"], marker)
+
+    def test_absent_implementation_policy_preserves_done_compatibility(self) -> None:
+        self.set_raw_config(lambda config: config.pop("implementation", None))
+        result = self.done_cli(self.evidence())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.status(), "done")
+
+    def test_malformed_config_fails_closed_before_transition(self) -> None:
+        self.set_raw_config_text("{\n")
+        result = self.done_cli(self.evidence())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read implementation provenance policy", result.stdout)
+        self.assertEqual(self.status(), "in_progress")
+
+    def test_unreadable_config_fails_closed_before_transition(self) -> None:
+        config_path = self.root / ".flow" / "config.json"
+        config_path.unlink()
+        config_path.mkdir()
+        result = self.done_cli(self.evidence())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot read implementation provenance policy", result.stdout)
+        self.assertEqual(self.status(), "in_progress")
+
+    def test_unknown_implementation_policy_fails_closed_before_transition(self) -> None:
+        self.set_raw_config(
+            lambda config: config["implementation"].update(unknown_policy=True)
+        )
+        result = self.done_cli(self.evidence())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unknown implementation setting(s): unknown_policy", result.stdout)
+        self.assertEqual(self.status(), "in_progress")
 
     def test_missing_request_and_force_leave_task_in_progress(self) -> None:
         self.enable_native()
@@ -281,6 +329,18 @@ class NativeProvenanceGateTest(_Repo):
         self.assertEqual(self.status(), "in_progress")
         verifier.assert_not_called()
 
+    def test_top_level_reason_is_rejected_before_calling_verifier(self) -> None:
+        self.enable_native()
+        verifier = mock.Mock()
+        module = self._verifier_module(verifier)
+        code, output = self.done_in_process_result(
+            self.evidence(self.request(reason="reason belongs to a child")), module
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("Invalid native_provenance request field(s): reason", output)
+        self.assertEqual(self.status(), "in_progress")
+        verifier.assert_not_called()
+
     def test_parent_and_base_failures_are_left_to_native_verifier(self) -> None:
         self.enable_native()
 
@@ -317,7 +377,13 @@ class NativeProvenanceGateTest(_Repo):
         )
         request = self.request(
             receipt={"receipt_sha256": "f" * 64},
-            reason="task needs a native-only implementation pass",
+            children=[
+                {
+                    "thread_id": "native-child-thread",
+                    "expected_files": ["src/example.py"],
+                    "reason": "task needs a native-only implementation pass",
+                }
+            ],
         )
         calls = []
         receipt = {"receipt_sha256": RECEIPT_SHA256, "verified": True}
@@ -333,8 +399,10 @@ class NativeProvenanceGateTest(_Repo):
         self.assertEqual(calls[0][0], self.root)
         self.assertNotIn("receipt", calls[0][1])
         self.assertEqual(calls[0][1]["task"], TASK_ID)
+        self.assertNotIn("reason", calls[0][1])
         self.assertEqual(
-            calls[0][1]["reason"], "task needs a native-only implementation pass"
+            calls[0][1]["children"][0]["reason"],
+            "task needs a native-only implementation pass",
         )
         self.assertEqual(
             calls[0][2],

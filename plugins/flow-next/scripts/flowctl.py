@@ -38029,7 +38029,7 @@ def cmd_done(args: argparse.Namespace) -> None:
                     code=2,
                 )
             request_fields = {"parent_thread", "children", "base_commit", "task"}
-            allowed_request_fields = request_fields | {"reason", "receipt"}
+            allowed_request_fields = request_fields | {"receipt"}
             unknown_request_fields = set(provenance_input) - allowed_request_fields
             if unknown_request_fields:
                 error_exit(
@@ -38056,8 +38056,7 @@ def cmd_done(args: argparse.Namespace) -> None:
             # Existing receipt material is intentionally discarded. Every done
             # call re-reads native history and the current candidate.
             provenance_request = {
-                key: provenance_input[key]
-                for key in request_fields | ({"reason"} & set(provenance_input))
+                key: provenance_input[key] for key in request_fields
             }
             try:
                 provenance_receipt = _verify_native_provenance(
