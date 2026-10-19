@@ -150,7 +150,8 @@ class CopilotDiffDelivery(unittest.TestCase):
                 _policy(repo, "file")
                 head = _git(repo, "rev-parse", "HEAD")
                 if kind == "completion":
-                    _git(repo, "branch", "main", base)
+                    _git(repo, "checkout", "-q", "--detach", head)
+                    _git(repo, "branch", "-f", "main", base)
                 argv = [
                     "copilot", f"{kind}-review", EPIC_ID, "--receipt", str(repo / f"{kind}.json"),
                     "--spec", "copilot:qwen-l40s:medium", "--json",

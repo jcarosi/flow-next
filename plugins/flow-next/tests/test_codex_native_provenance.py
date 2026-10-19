@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -97,6 +98,32 @@ class FixtureClient:
                         "nextCursor": None}
             raise AssertionError(f"unexpected items cursor {cursor!r}")
         raise AssertionError(f"unexpected native RPC method {method!r}")
+
+
+class UnsupportedNativePlatformTests(unittest.TestCase):
+    def test_windows_refuses_before_repository_or_native_client_access(self) -> None:
+        clients = (("injected", mock.Mock()), ("owned", None))
+        for label, client in clients:
+            with self.subTest(client=label):
+                with (
+                    patch.object(native_provenance.os, "name", "nt"),
+                    patch.object(native_provenance, "_prepare_repository") as prepare,
+                    patch.object(native_provenance, "_git") as git,
+                    patch.object(native_provenance.shutil, "which") as find_codex,
+                    patch.object(native_provenance, "RpcClient") as rpc_client,
+                ):
+                    with self.assertRaisesRegex(
+                        VerificationError,
+                        "POSIX",
+                    ):
+                        verify_native(r"C:\unsupported", None, None, client)
+
+                prepare.assert_not_called()
+                git.assert_not_called()
+                find_codex.assert_not_called()
+                rpc_client.assert_not_called()
+                if client is not None:
+                    client.call.assert_not_called()
 
 
 @unittest.skipIf(os.name == "nt", "The adapter currently verifies POSIX-native Codex paths only.")

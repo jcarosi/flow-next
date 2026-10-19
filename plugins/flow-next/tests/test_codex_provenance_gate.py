@@ -287,6 +287,14 @@ class NativeProvenanceGateTest(_Repo):
             ["git", "-C", str(outside_flow), "config", "user.name", "Test"],
             check=True,
         )
+        subprocess.run(
+            ["git", "-C", str(outside_flow), "config", "gc.auto", "0"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(outside_flow), "config", "maintenance.auto", "false"],
+            check=True,
+        )
         (outside_flow / "tracked.txt").write_text("fixture\n", encoding="utf-8")
         subprocess.run(
             ["git", "-C", str(outside_flow), "add", "tracked.txt"], check=True
@@ -310,7 +318,12 @@ class NativeProvenanceGateTest(_Repo):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("request must contain parent_thread", result.stdout)
+        expected_refusal = (
+            "request must contain parent_thread"
+            if os.name == "posix"
+            else "POSIX platforms only"
+        )
+        self.assertIn(expected_refusal, result.stdout)
         self.assertFalse((outside_flow / ".flow").exists())
         self.assertEqual(
             before,

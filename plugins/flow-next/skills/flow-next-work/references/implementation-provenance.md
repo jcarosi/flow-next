@@ -114,6 +114,13 @@ compatible and does not require a native request. For coordinator PR
 cognitive-aid artifacts, the standalone checker uses the canonical validator
 from its sibling `flowctl.py` and fails closed if that validator is unavailable.
 
+The adapter supports POSIX platforms only. End-to-end native app-server history
+coverage runs on macOS. Linux coverage exercises path parsing and fixture-backed
+unit verification, but does not establish live Codex transport compatibility.
+Native Windows verification is unsupported and refuses before Git or Codex
+history reads. The default-off setting and existing completion behavior remain
+unchanged on every host.
+
 The request assigns every child a closed set of repository-relative files. The
 adapter replays all included children against the common base in native activity
 order and compares their bytes and executable mode with the current candidate.

@@ -445,7 +445,7 @@
     "impl:fn-305-native-implementation-provenance-with.1": 0
   },
   "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
-  "status": "done",
+  "status": "open",
   "title": "Native implementation provenance with scoped coordination and candidate integrity",
   "tracker": {
     "baseHashFlow": null,
@@ -458,5 +458,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-19T17:39:14.922147Z"
+  "updated_at": "2026-10-19T17:53:42.781591Z"
 }

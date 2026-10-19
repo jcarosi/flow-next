@@ -1993,6 +1993,13 @@ def verify_native(
     An injected client exposes a read-only call(method, params) operation.
     Otherwise this initializes Codex app-server and uses only thread read RPCs.
     """
+    if os.name != "posix":
+        platform_detail = (
+            "Windows native verification is unsupported"
+            if os.name == "nt"
+            else f"native verification is unsupported on {os.name!r} hosts"
+        )
+        raise ProvenanceError(f"POSIX platforms only; {platform_detail}")
     if not isinstance(request, Mapping) or not isinstance(policy, Mapping):
         raise ProvenanceError("request and policy must be mappings")
     root, root_text, head = _prepare_repository(repo_root)
