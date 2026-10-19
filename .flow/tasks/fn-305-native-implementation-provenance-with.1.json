@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-305-native-implementation-provenance-with",
   "spec_path": ".flow/tasks/fn-305-native-implementation-provenance-with.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Integrate native provenance and validate scoped coordination",
   "updated_at": "2026-10-19T14:34:54.410786Z"
 }
