@@ -40,3 +40,8 @@ No universal security framework, no personal paths/models in Flow defaults, no c
 ## Decision Context
 
 One cohesive engineering outcome; direct execution with bounded implementation children, independent full review and independent completion review. Prefer the existing done/evidence boundary over another workflow framework. Reject native instructions as filesystem isolation, broad .flow exemptions, per-event exception registries and trusting self-reported model labels or stale receipts. Standing criteria G1/G2/G4 apply. [inferred]
+
+
+## Current closure authorization
+
+The user explicitly requires GitHub Copilot CLI with native model claude-opus-5.5 at medium for independent implementation and completion reviews in this mission. Use the packaged Flow Copilot backend and frozen file-delivered diffs, preserve shell/write restrictions and reviewer independence. Do not use Claude Code CLI for Opus or Qwen for this closure, request Claude authentication, change default reviewers, or remove the historical global verifier. Preserve the earlier 401 as an interrupted attempt without a verdict. Reuse unchanged successful validation, fix confirmed findings, then publish only the dedicated Flow branch and PR without merging. Global replacement and installation are deferred until subsequent integration and end-to-end validation.
