@@ -1,7 +1,7 @@
 {
   "branch_name": "feat/codex-native-provenance",
   "completion_review_status": "ship",
-  "completion_reviewed_at": "2026-10-19T17:38:09.467738Z",
+  "completion_reviewed_at": "2026-10-19T18:05:10.674991Z",
   "created_at": "2026-10-19T14:34:09.023180Z",
   "default_impl": null,
   "default_review": null,
@@ -468,12 +468,46 @@
       "task": "fn-305-native-implementation-provenance-with.2",
       "timestamp": "2026-10-19T18:03:43.053110Z",
       "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "6adf77d78b2b0d277254177299d6e89fa76cd70d343d45976105a09338c1b760",
+      "backend": "copilot",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "copilot",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "completion"
+      },
+      "forced": false,
+      "hash_epoch": 1,
+      "head_sha": "0a12da9dadd36fb1c7ee43252d999bc9b7892e46",
+      "head_sha_observed": true,
+      "kind": "completion",
+      "model": "claude-opus-5.5",
+      "outcome": "verdict",
+      "output_bytes": 2526,
+      "output_sha256": "75fe4692944b458c017912ae118f9dedc78f338a1a00102b79f9390fd0201ae6",
+      "reservation_id": "6eb525c6416643758b7650276e7eca69",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-10-19T18:05:10.671535Z",
+      "verdict": "SHIP"
     }
   ],
   "review_hash_epoch": {
     "impl:fn-305-native-implementation-provenance-with.1": 2,
     "impl:fn-305-native-implementation-provenance-with.2": 1,
-    "plan#completion": 1
+    "plan#completion": 2
   },
   "review_pending_rounds": {},
   "review_reservations": {},
@@ -483,7 +517,7 @@
     "impl:fn-305-native-implementation-provenance-with.2": 0
   },
   "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
-  "status": "open",
+  "status": "done",
   "title": "Native implementation provenance with scoped coordination and candidate integrity",
   "tracker": {
     "baseHashFlow": null,
@@ -496,5 +530,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-19T18:03:43.056739Z"
+  "updated_at": "2026-10-19T18:06:22.326745Z"
 }

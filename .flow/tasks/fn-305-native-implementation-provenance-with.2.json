@@ -8,7 +8,7 @@
   "priority": null,
   "spec": "fn-305-native-implementation-provenance-with",
   "spec_path": ".flow/tasks/fn-305-native-implementation-provenance-with.2.md",
-  "status": "todo",
+  "status": "done",
   "title": "Resolve cross-platform provenance and review fixture regressions",
   "updated_at": "2026-10-19T17:53:42.780063Z"
 }
