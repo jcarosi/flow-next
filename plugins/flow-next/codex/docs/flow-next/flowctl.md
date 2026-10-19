@@ -1292,6 +1292,7 @@ flowctl config set memory.enabled false [--json]
 | `scouts.github` | bool | `false` | Enable github-scout during planning (requires gh CLI) |
 | `review.backend` | string | `null` | Default review backend (`codex`, `copilot`, `cursor`, `claude`, `host`, `none`), or spec form (`codex:<model>:<effort>`, `claude:<model>:<effort>` with efforts `low`/`medium`/`high`/`xhigh`/`max`, `cursor:<model>` - cursor folds effort into the model, no `:effort` rung). If unset, review commands require `--review` or `FLOW_REVIEW_BACKEND`. A stale `rp` or `export` value prints a notice and review reads as not configured; `config set` rejects it. |
 | `review.fanoutExecution` | string | `concurrent` | First-round CLI review scheduling: concurrent by default or sequential in supplied axis order, completing each draw and its sidecars before starting the next; re-review stays single. |
+| `review.copilotDiffDelivery` | string | `native` | Copilot ranged primary reviews use the native prompt path by default; `file` writes the exact pinned diff to a readable artifact and directs the shell-less reviewer to read it. Resumed optional passes keep using the primary prompt and artifact. |
 | `review.maxIterations` | int | `8` | Cumulative review-round cap per scope. **Precedence: env `MAX_REVIEW_ITERATIONS` > this key > 8.** Minimum 1 on **both** rungs, and the cap can never be disabled: an invalid config value falls back to 8, and a **present-but-invalid** env value also stops at 8 rather than handing control to the config value it was overriding (only an absent or empty env var proceeds to the config rung). This is the knob to reach for when a review loop costs more than it is worth: **lower the cap, never re-add trend-based stall inference** (see the fn-168 decision record). Raising it is a **human** act, enforced in the consumer rather than only at the guard: in an autonomous run (`flow --auto`) this key may only **lower** the cap, never raise it - whatever wrote the file and however it was written - so a bigger number cannot extend an agent's own gate. Lowering stays honored, since that is the intended knob. |
 | `tracker.enabled` | bool | `false` | Enable the tracker-sync bridge (see [`flowctl sync`](#flowctl-sync)). The bridge is active iff raw `tracker.enabled == true` OR raw `tracker.type ∈ {linear, github, gitlab, jira}`. |
 | `tracker.type` | string | `null` | Tracker backend: `linear`, `github`, `gitlab`, or `jira`. |
@@ -2773,6 +2774,8 @@ flowctl copilot deep-pass --pass adversarial|security|performance \
 ```
 
 Spec form: `copilot[:model[:effort]]`. Default model resolved via env (`FLOW_COPILOT_MODEL`) / config / registry. Receipt fields mirror codex: `mode: "copilot"`, `session_id` for resume.
+
+Primary ranged reviews use `review.copilotDiffDelivery`: `native` (default) keeps the prompt's normal git-diff instructions; `file` writes the complete pinned base-to-head diff under `.flow/tmp/claude-review/` and names that path in the prompt. Only the primary review dispatch reads this setting; optional passes reuse the session without rematerializing the range. The Copilot CLI denies shell and write tools in both modes.
 
 ### cursor
 

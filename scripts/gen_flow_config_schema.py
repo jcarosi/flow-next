@@ -89,6 +89,12 @@ DESCRIPTIONS: dict[str, str] = {
         "starting the next in supplied axis order. Re-review stays single. "
         "Invalid writes and persisted values are rejected before dispatch."
     ),
+    "review.copilotDiffDelivery": (
+        "Copilot primary review diff delivery: native (default) asks Copilot "
+        "to inspect the pinned range with git, while file writes the complete "
+        "frozen diff to a readable artifact path and directs the shell-less "
+        "reviewer to read it. Optional and limited to ranged primary reviews."
+    ),
     "review.maxIterations": (
         "Cumulative review-round cap per scope (default 8, minimum 1 - the cap "
         "can never be disabled). The env var MAX_REVIEW_ITERATIONS takes "
@@ -518,6 +524,7 @@ def _build_table() -> list[tuple[str, dict]]:
         ("review", {"kind": "object", "open": False}),
         ("review.backend", _review_backend_fragment()),
         ("review.fanoutExecution", {"type": "string", "enum": list(flowctl.REVIEW_FANOUT_EXECUTION_VALUES)}),
+        ("review.copilotDiffDelivery", {"type": "string", "enum": list(flowctl.COPILOT_DIFF_DELIVERY_VALUES)}),
         ("review.maxIterations", {"type": "integer", "minimum": 1}),
         ("scouts", {"kind": "object", "open": False}),
         ("scouts.github", {"type": "boolean"}),

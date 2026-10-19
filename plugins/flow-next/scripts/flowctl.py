@@ -1401,17 +1401,30 @@ def default_spec_tracker_state() -> dict:
 
 
 REVIEW_FANOUT_EXECUTION_VALUES = ("concurrent", "sequential")
+COPILOT_DIFF_DELIVERY_VALUES = ("native", "file")
+REVIEW_POLICY_VALUES = {
+    "review.fanoutExecution": REVIEW_FANOUT_EXECUTION_VALUES,
+    "review.copilotDiffDelivery": COPILOT_DIFF_DELIVERY_VALUES,
+}
+
+
+def _review_config_enum(key: str) -> str:
+    """Read a strict review policy; hand-edited invalid values fail closed."""
+    values = REVIEW_POLICY_VALUES.get(key)
+    if values is None:
+        raise ValueError(f"Unknown review policy {key!r}")
+    value = get_config(key)
+    if not isinstance(value, str) or value not in values:
+        raise ValueError(
+            f"Invalid {key} value {value!r}. Expected one of: "
+            + ", ".join(values)
+        )
+    return value
 
 
 def _review_fanout_execution() -> str:
     """Read the strict fan-out scheduling policy."""
-    value = get_config("review.fanoutExecution")
-    if not isinstance(value, str) or value not in REVIEW_FANOUT_EXECUTION_VALUES:
-        raise ValueError(
-            f"Invalid review.fanoutExecution value {value!r}. Expected one of: "
-            + ", ".join(REVIEW_FANOUT_EXECUTION_VALUES)
-        )
-    return value
+    return _review_config_enum("review.fanoutExecution")
 
 
 def get_default_config() -> dict:
@@ -1433,7 +1446,7 @@ def get_default_config() -> dict:
         # may only lower the cap, so an autonomous agent cannot extend its own gate.
         "review": {
             "backend": None, "maxIterations": DEFAULT_MAX_REVIEW_ITERATIONS,
-            "fanoutExecution": "concurrent",
+            "fanoutExecution": "concurrent", "copilotDiffDelivery": "native",
         },
         "scouts": {"github": False},
         "tracker": get_default_tracker_config(),
@@ -20224,11 +20237,12 @@ def cmd_config_set(args: argparse.Namespace) -> None:
 
     canonical_key, _ = resolve_config_key_for_write(args.key)
 
-    if canonical_key == "review.fanoutExecution":
-        if not isinstance(args.value, str) or args.value not in REVIEW_FANOUT_EXECUTION_VALUES:
+    if canonical_key in REVIEW_POLICY_VALUES:
+        values = REVIEW_POLICY_VALUES[canonical_key]
+        if not isinstance(args.value, str) or args.value not in values:
             error_exit(
                 f"Invalid {canonical_key} value {args.value!r}. Expected one of: "
-                + ", ".join(REVIEW_FANOUT_EXECUTION_VALUES),
+                + ", ".join(values),
                 use_json=args.json, code=2,
             )
 
@@ -44618,6 +44632,35 @@ def _copilot_run_exec(
     args: argparse.Namespace,
 ) -> tuple[str, Optional[str], int, str]:
     """Copilot spawn: session_id is always a UUID (marker-based create-or-resume)."""
+    review_range = getattr(args, "claude_range", None)
+    if review_range is not None:
+        delivery = getattr(args, "copilot_diff_delivery", None)
+        try:
+            if delivery is None:
+                delivery = _review_config_enum("review.copilotDiffDelivery")
+            elif delivery not in COPILOT_DIFF_DELIVERY_VALUES:
+                raise ValueError(
+                    "Invalid review.copilotDiffDelivery value "
+                    f"{delivery!r}. Expected one of: "
+                    + ", ".join(COPILOT_DIFF_DELIVERY_VALUES)
+                )
+        except ValueError as exc:
+            return "", session_id, 2, f"copilot review diff delivery: {exc}"
+        if delivery == "file":
+            base, head, receipt_id = review_range
+            try:
+                diff_path = _claude_materialise_review_diff(
+                    repo_root, receipt_id, base, head
+                )
+            except (ClaudeReviewDiffError, OSError) as exc:
+                return "", session_id, 2, f"copilot review diff: {exc}"
+            prompt += (
+                "\n\n## Diff delivery (copilot backend)\n\n"
+                "This session has no shell: use file tools to read the complete "
+                f"frozen diff for `{base}..{head}` at `{diff_path}` instead of "
+                "running git. Read it yourself; do not delegate this review. "
+                "Repository files remain readable at their normal paths.\n"
+            )
     managed = _managed_review_exec(
         prompt, backend="copilot", session_id=session_id, repo_root=repo_root, spec=spec,
         resolution_out=resolution_out, args=args,
