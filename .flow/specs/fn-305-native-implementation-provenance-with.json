@@ -72,13 +72,41 @@
       "task": "fn-305-native-implementation-provenance-with.1",
       "timestamp": "2026-10-19T15:38:47.318261Z",
       "verdict": null
+    },
+    {
+      "artifact_sha256": "d5af3316b4b78c74f3e24a7cb8bbbe9d0ee675fff9b382114a2c0c6c7969387e",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "149c172bdc7644bf104bbf30d52191a8bdc08406",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 414,
+      "output_sha256": "63468a79325b70b5118efb1746dcd029f0a69a4980be19fbc84c1e269f248b24",
+      "reservation_id": "b20aac1c102545e7b0865848eb1bf0a6",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:41:02.712283Z",
+      "verdict": null
     }
   ],
   "review_hash_epoch": {},
   "review_pending_rounds": {},
   "review_reservations": {},
   "review_transport_failures": {
-    "impl:fn-305-native-implementation-provenance-with.1": 2
+    "impl:fn-305-native-implementation-provenance-with.1": 3
   },
   "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
   "status": "open",
@@ -94,5 +122,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-19T15:40:12.305113Z"
+  "updated_at": "2026-10-19T15:41:02.712896Z"
 }
