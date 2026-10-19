@@ -5,6 +5,7 @@
 > User: "Privilégier l'intégration des contrôles pertinents directement dans Flow-Next et l'utilisation des mécanismes natifs de Codex"
 > User: "ne supprime aucune garantie de sécurité sans avoir démontré qu'elle est effectivement préservée."
 > User: "Ne considère pas Flow-Next comme une frontière de sécurité universelle."
+> User, review authorization update: "je t'autorise opus 5.5 dans cette conversation, exceptionnelemment"
 
 ## Goal & Context
 
@@ -20,7 +21,7 @@ Native evidence references identify a parent, bounded children, allowed role/mod
 
 ## Edge Cases & Constraints
 
-Applications outside this repository remain read-only. No new reviewer authorization, no permanent routing changes, no unsafe live bypass experiments. Fail closed on unknown protocol, ambiguous paths, symlinks, missing history or unsupported content. Native history and hashes are detective evidence, not an unforgeable OS boundary. Stage global changes only after isolated tests, backup and exact rollback. [paraphrase]
+Applications outside this repository remain read-only. Use only reviewers explicitly authorized for this conversation, preserve permanent routing, and run bypass experiments only in disposable fixtures. Fail closed on unknown protocol, ambiguous paths, symlinks, missing history or unsupported content. Native history and hashes are detective evidence, not an unforgeable OS boundary. Stage global changes only after isolated tests, backup and exact rollback. [paraphrase]
 
 ## Acceptance Criteria
 
@@ -29,7 +30,7 @@ Applications outside this repository remain read-only. No new reviewer authoriza
 - **R3:** Valid new Flow specs/state/coordination events and delegated edits complete without event-specific exceptions. Paths cannot disguise application writes as planning. [paraphrase]
 - **R4:** Reconcile observed native text edits and final Git/disk candidate, including mutations through shell or MCP when their effects are observable; document identical overwrite, invisible external effects and other coverage limits. Reject unsupported evidence rather than claim coverage. [paraphrase]
 - **R5:** Reproducible isolated positive/negative tests cover A through P from the mandate, reuse audit regressions and exercise real CLI and native-history routes. No real application protections are disabled. [paraphrase]
-- **R6:** Independent packaged claude:qwen-l40s:medium full pertinent diff review and completion review have truthful runtime/commit provenance; diagnose timeouts without repeating identical attempts. Unavailable mandatory review blocks acceptance and installation. [paraphrase]
+- **R6:** Independent packaged full pertinent diff review and completion review use the reviewer authorized for this conversation and have truthful runtime/commit provenance. Qwen remains the standing route; the user explicitly authorized Opus 5.5 exceptionally in this conversation. Diagnose failures without repeating identical attempts. Unavailable mandatory review blocks acceptance and installation. [paraphrase]
 - **R7:** Preserve application trees and preexisting local changes; coherent local commits and only a dedicated jcarosi/flow-next branch/PR, with official candidate installation verification, backups and rollback before shared replacement. Global/Chezmoi changes stay local and maintain coherence. [paraphrase]
 
 ## Boundaries

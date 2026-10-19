@@ -8,12 +8,78 @@
   "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-305-native-implementation-provenance-with",
-  "impl_review_rounds": {},
+  "impl_review_rounds": {
+    "fn-305-native-implementation-provenance-with.1": 0
+  },
   "next_task": 1,
   "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "review_attempts": [
+    {
+      "artifact_sha256": "2b909404bdc8e16107b3f5efeda5fef9eff204d79c7a5c80a5acfbad28e9d48b",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "Available Model Group Fallbacks=None",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "62dcb6588b201b412459a0c2286aa3c148429617",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 222,
+      "output_sha256": "a199abe352ae680474413afcdc5c5ee0c0b3f85f51a63b580161995cf54717f0",
+      "reservation_id": "93ac6dd01f264ca69988cbf6166c7cfb",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:31:35.762699Z",
+      "verdict": null
+    },
+    {
+      "artifact_sha256": "2b909404bdc8e16107b3f5efeda5fef9eff204d79c7a5c80a5acfbad28e9d48b",
+      "backend": "claude",
+      "base_sha": "50483d551dd38aba062dccf93ef19b7143084e7f",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "[claude-code:unrecognized_model] {\"model\":\"qwen-l40s\",\"query_source\":\"sdk\"}",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "62dcb6588b201b412459a0c2286aa3c148429617",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 180,
+      "output_sha256": "52b4914b49b8894757a4f7744e3f595daf9cff6a7b5beb7a47c79746490351d5",
+      "reservation_id": "00ab25828a824d5db6bcc3dcfa8b651d",
+      "round_consumed": false,
+      "scope": "impl:fn-305-native-implementation-provenance-with.1",
+      "superseded_by": null,
+      "task": "fn-305-native-implementation-provenance-with.1",
+      "timestamp": "2026-10-19T15:38:47.318261Z",
+      "verdict": null
+    }
+  ],
+  "review_hash_epoch": {},
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-305-native-implementation-provenance-with.1": 2
+  },
   "spec_path": ".flow/specs/fn-305-native-implementation-provenance-with.md",
   "status": "open",
   "title": "Native implementation provenance with scoped coordination and candidate integrity",
@@ -28,5 +94,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-19T14:34:54.088758Z"
+  "updated_at": "2026-10-19T15:40:12.305113Z"
 }
