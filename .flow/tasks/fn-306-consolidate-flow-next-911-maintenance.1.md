@@ -26,23 +26,21 @@ Publish only a validated, fast-forward update to the verified fork destination.
 
 
 ## Done summary
-Blocked:
-The required independent review gate R6 is unmet. The official initial integrated panel for `6236e0d6142ec0ceaefab8701d5c55bf8dc905ba..f5749469c859cd2f84e9484e3b624f8b2387087e` was dispatched through `claude:qwen-l40s:medium` and exited with code 2. All three native reviewer contexts ended with API 400 `ContextWindowExceededError`; the panel produced no verdict. The reserved round was refunded and consumed zero tokens. No context reset, retry, model or harness fallback, or alternate review route was used.
+Initial implementation-review attempt — blocked, no verdict:
 
-Source validations and local safety gates are green, but they do not satisfy R6. The independent implementation review has no valid verdict, and the required independent specification-completion review is therefore not complete. Keep the source unpublished and defer active installation until the required reviews succeed against the final candidate SHA. The candidate pin remains provisional.
+The official integrated panel for `6236e0d6142ec0ceaefab8701d5c55bf8dc905ba..f5749469c859cd2f84e9484e3b624f8b2387087e` was dispatched through `claude:qwen-l40s:medium` and exited with code 2. All three native reviewer contexts ended with API 400 `ContextWindowExceededError`; the panel produced no verdict. The reserved review round was refunded and zero implementation-review rounds were consumed. Provider token usage was not aggregated, so this is not evidence of zero token use. No `SHIP` was produced.
 
-Evidence is in `.git/maintenance/20261024/maintenance-review-dispatch.log`, `.git/maintenance/20261024/review-runtime-evidence.json`, and the three native reviewer profiles under `.git/maintenance/20261024/reviewer-claude/projects/-Users-julien-Worktrees-flow-next-maintenance-20261024/` (`bc0b0629-ec20-43b8-bf26-fe1ba804be9f.jsonl`, `d50f9504-ca68-42f8-8831-744563baef08.jsonl`, and `0ffff298-c520-4256-8f55-0d26fca59fc7.jsonl`).
-
-This review infrastructure failure does not implicate OAP or its FN-60 protective stop. OAP was not changed or used for this review. Qwen analytical fixes and benchmark work remain outside this maintenance scope.
-
-Blocked:
-The required independent review gate R6 is unmet. The official initial integrated panel for `6236e0d6142ec0ceaefab8701d5c55bf8dc905ba..f5749469c859cd2f84e9484e3b624f8b2387087e` was dispatched through `claude:qwen-l40s:medium` and exited with code 2. All three native reviewer contexts ended with API 400 `ContextWindowExceededError`; the panel produced no verdict. The reserved review round was refunded; the task has zero consumed implementation-review rounds. Native provider token usage was not aggregated for this maintenance report. No context reset, retry, model or harness fallback, or alternate review route was used.
-
-Source validations and local safety gates are green, but they do not satisfy R6. The independent implementation review has no valid verdict, and the required independent specification-completion review is therefore not complete. Keep the source unpublished and defer active installation until the required reviews succeed against the final candidate SHA. The candidate pin remains provisional.
+Source validations and local safety gates do not satisfy R6. At this block, the implementation review had no valid verdict and the required specification-completion review had not run. The candidate was unpublished; active installation remained deferred, and the candidate pin remained provisional.
 
 Evidence is in `.git/maintenance/20261024/maintenance-review-dispatch.log`, `.git/maintenance/20261024/review-runtime-evidence.json`, and the three native reviewer profiles under `.git/maintenance/20261024/reviewer-claude/projects/-Users-julien-Worktrees-flow-next-maintenance-20261024/` (`bc0b0629-ec20-43b8-bf26-fe1ba804be9f.jsonl`, `d50f9504-ca68-42f8-8831-744563baef08.jsonl`, and `0ffff298-c520-4256-8f55-0d26fca59fc7.jsonl`).
 
 This review infrastructure failure does not implicate OAP or its FN-60 protective stop. OAP was not changed or used for this review. Qwen analytical fixes and benchmark work remain outside this maintenance scope.
+
+Current authorized resumption — R6 still pending:
+
+> user: "je tautorise exceptionnellement copilot/opus 5.5 pour aller au bout"
+
+For FN-306 only, the user authorizes the exact per-run route `copilot:claude-opus-5.5:high` for the required implementation and separate specification-completion reviews. This exception preserves the review gates and requires native evidence of the effective route, effort, harness/session provenance, and reviewed commit range; it does not change reviewer defaults, global configuration, permissions, or policy. Keep the initial Qwen failure as a failed no-verdict attempt; do not convert it into `SHIP` or reset review counters. No new review verdict is recorded here. The exception does not authorize an OAP/FN-60 workflow or review, Qwen lab work, or a new pull request.
 ## Evidence
 - Commits:
 - Tests:

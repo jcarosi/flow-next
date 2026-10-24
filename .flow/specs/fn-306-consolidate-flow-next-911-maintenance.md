@@ -7,6 +7,8 @@
 > user: "Ne relâche pas globalement le garde de l'arbre Git modifié."
 >
 > user: "Conduis cette maintenance de bout en bout, sans intervention humaine inutile, avec une installation reproductible et des preuves de non-régression."
+>
+> user: "je tautorise exceptionnellement copilot/opus 5.5 pour aller au bout"
 
 ## Goal & Context
 
@@ -35,7 +37,7 @@ No new public commands, configuration keys, reviewer routes, or file formats are
 - **R3:** Disposable offline fixtures cover clean/dirty repositories crossed with ready/unready specs and non-empty blocker lists. They assert the documented `NEEDS_HUMAN` verdict and reason, no reviewer launch on a guard stop, and preserved workflow files and state apart from the pre-dispatch diagnostic snapshot. Tests follow G2. A correct refusal passes. Errors: no fixture touches OAP or invokes a real reviewer. [paraphrase]
 - **R4:** The supported install path is staged and its source, installed files, configuration preservation, rollback copy, and smoke checks are recorded. Activation occurs only when no observed active process could use the replaced files; otherwise the validated activation remains deferred. Errors: path, symlink, ownership, backup, or provenance mismatch blocks installation. [paraphrase]
 - **R5:** The final candidate passes the repository's full test suite, pinned Ruff check, generated-artifact checks, affected offline regressions, and host installation smoke checks; complete output is retained as evidence. Any failure remains visible and blocks a clean maintenance verdict. [paraphrase]
-- **R6:** The effective configured `claude:qwen-l40s:medium` implementation review and required specification-completion review cover the final candidate in separate reviewer contexts with verifiable route evidence. No real reviewer result is inferred from mocks. Errors: unavailable or unverifiable configured review leaves the candidate unvalidated and unpublished. [paraphrase]
+- **R6:** The initial integrated implementation review through `claude:qwen-l40s:medium` failed before a verdict when all three native reviewer contexts hit API 400 `ContextWindowExceededError`; preserve that failed attempt as evidence and infer no verdict from it. Under the user's current-task exception in Conversation Evidence and Decision Context, the required implementation review and separate specification-completion review use the exact per-run route `copilot:claude-opus-5.5:high`. Verify the effective reviewer model, effort, harness/session provenance, and reviewed commit range from native runtime evidence. No real reviewer result is inferred from mocks. Errors: an unavailable or unverifiable route, incomplete scope, or missing verdict leaves the candidate unvalidated and unpublished. [paraphrase]
 - **R7:** Fork publication targets only the verified `jcarosi/flow-next` branch, is a non-forced fast-forward from its observed remote head, includes only validated maintenance commits, and is verified by the resulting SHA and CI state. A failed safety check leaves changes local and records the rollback path. [paraphrase]
 
 ## Boundaries
@@ -43,6 +45,7 @@ No new public commands, configuration keys, reviewer routes, or file formats are
 - Leave OAP and FN-60 unchanged; do not execute their workflow or direct review.
 - Do not change global Codex, Chezmoi, reviewer, permissions, updater, or policy files.
 - Do not import unqualified Qwen laboratory prototypes, alter reviewer model defaults, run benchmark/lab Qwen campaigns, or create a pull request. The configured maintenance reviews in R6 remain required release gates.
+- The Copilot/Opus 5.5 exception applies only to FN-306's required implementation and completion reviews. It does not change global configuration, reviewer defaults, permissions, or policy and does not authorize a different route or OAP/FN-60 review.
 - Do not weaken dirty-tree, readiness, provenance, reviewer permission, coverage, or completion guards.
 
 ## Decision Context
@@ -51,4 +54,5 @@ No new public commands, configuration keys, reviewer routes, or file formats are
 - Retain validated behavior rather than old implementation lines. An upstream or PR change replaces a local patch only when tests demonstrate equivalent or stronger behavior.
 - This is one cohesive maintenance task on `maintenance/flow-next-9.1.1-20261024`; execution is direct/no-plan.
 - The ban on Qwen campaigns excludes benchmarks and exploratory lab runs; the independently configured implementation and completion reviews remain the requested maintenance gates.
+- The initial Qwen review attempt remains a failed, no-verdict attempt. The user explicitly authorizes `copilot:claude-opus-5.5:high` as a per-run override for only this maintenance task's required implementation and completion reviews; verify actual runtime routing and preserve separate reviewer contexts and all existing gates. This authorization does not alter defaults or global policy. [inferred]
 - Respect G4: no new pre-action structure is introduced beyond the user's requested existing maintenance and release gates.
