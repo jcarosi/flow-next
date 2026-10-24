@@ -24216,7 +24216,8 @@ def judge_route_lifecycle(state: dict) -> dict:
         # Affirmative requests only: a negated request or a code identifier is not a plan signal.
         "asks_for_plan": r"(?<!\bnot )(?<!n't )(?<!\bnever )(?:\bplan (this|it) out\b|\bplan (it |this )?(into|as) tasks\b|\b(?:break|split|decompose) (this|it) (down )?into tasks\b|\btask plan\b)",
         "separate_owners": r"\b(\w+'s team|team [ab]|another team|other team|the backend team|the frontend team|goes to \w+ and .* to (?:mine|me)|owned by different|separate owners|two teams|each team)\b",
-        "staged_prs": r"\b(separate|two|three|several|multiple|staged|stacked)\s+prs?\b|\bin (two|three) prs\b",
+        # Delivery phrasing only ("ship in two PRs", "split into stacked PRs"): PRs as the spec's subject are not a signal.
+        "staged_prs": r"\b(?:in|into|across|over|as|ship|deliver|open|split)\s+(?:two|three|four|several|multiple|separate|stacked)\s+(?:stacked\s+)?prs?\b",
     }
     for signal, pattern in patterns.items():
         if re.search(pattern, text, re.I):
@@ -24562,7 +24563,43 @@ def judge_tier_dispatch(result: dict, args: argparse.Namespace) -> dict:
             line = f"Tier: long_running (jev {confidence:.2f}) - bridge recommended"
         else:
             line = f"Tier: session (jev {answer['choice']} {confidence:.2f})"
-    return {"tier_line": line, "spawn_model": selected_model, "implementer": implementer}
+    bridged = bool(implementer) and not selected_model and can_bridge
+    effort, suffix = judge_tier_effort(result, args, bridged)
+    spawn_effort = None
+    if effort and bridged:
+        implementer = f"{implementer} at {effort}"
+    elif effort:
+        spawn_effort = effort
+    return {"tier_line": line + suffix, "spawn_model": selected_model, "implementer": implementer,
+            "spawn_effort": spawn_effort}
+
+
+def judge_tier_effort(result: dict, args: argparse.Namespace, bridged: bool) -> tuple:
+    """Worker effort from the tier answer, one step on the host's ladder; requested and role efforts win."""
+    if not getattr(args, "task", None):
+        return None, ""  # Scouts keep their own effort selection.
+    levels = [level.strip() for level in (getattr(args, "effort_levels", None) or "").split(",") if level.strip()]
+    default = getattr(args, "default_effort", None)
+    requested = getattr(args, "explicit_effort", None)
+    role_effort = getattr(args, "role_effort", None)
+    if role_effort and not bridged:  # A role pin configures the native spawn, never a bridged child.
+        return None, f" at {role_effort} effort (role pins effort)"
+    if requested:
+        if not levels and not bridged:
+            return None, f"; effort {requested} not applied (host spawn takes no effort)"
+        return requested, f" at {requested} effort (requested)"
+    answer = result["answers"]["tier"] if result.get("available") else None
+    step = {"mechanical": -1, "intelligent": 1}.get(answer["choice"], 0) if answer and answer["confidence"] >= 0.8 else 0
+    if not step:
+        return None, " at default effort"
+    if not levels:
+        return None, "; effort not applied (host spawn takes no effort)"
+    if default not in levels:
+        return None, "; effort not applied (host default effort unknown)"
+    level = levels[min(max(levels.index(default) + step, 0), len(levels) - 1)]
+    if level == default:
+        return None, " at default effort"
+    return level, f" at {level} effort (host default {default})"
 
 
 def cmd_judge(args: argparse.Namespace) -> None:
@@ -26383,11 +26420,71 @@ def cmd_prospect_write(args: argparse.Namespace) -> None:
     json_output({"success": True, "artifact_id": artifact_id, "path": str(path), **fm})
 
 
+def _qa_receipt_scenarios(value, path: Path, review_id, branch: str, head: str, errors: list[str]) -> Optional[list]:
+    """Stamp live scenarios with this head; copy carried ones from the prior receipt."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        errors.append("scenarios: expected a list")
+        return None
+    prior = None
+    rows, seen = [], set()
+    for i, row in enumerate(value):
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip():
+            errors.append(f"scenarios[{i}].id: expected a non-empty string")
+            continue
+        if row["id"] in seen:
+            errors.append(f"scenarios[{i}].id: duplicate")
+            continue
+        seen.add(row["id"])
+        if row.get("run") == "carried":
+            if prior is None:
+                prior = _qa_prior_scenarios(path, review_id, branch)
+            if isinstance(prior, str):
+                errors.append(f"scenarios[{i}]: {prior}")
+                continue
+            source = prior.get(row["id"])
+            if source is None:
+                errors.append(f"scenarios[{i}]: {row['id']} is not in the prior receipt")
+            elif source.get("outcome") != "PASS" or not isinstance(source.get("head_sha"), str):
+                errors.append(f"scenarios[{i}]: {row['id']} did not pass in the prior receipt")
+            elif source["head_sha"] == head:
+                errors.append(f"scenarios[{i}]: {row['id']} ran at the same head; record it as live")
+            else:
+                rows.append({"id": row["id"], "rids": source.get("rids", []), "outcome": "PASS", "run": "carried",
+                             "evidence": source.get("evidence", []), "head_sha": source["head_sha"]})
+        elif row.get("run") == "live":
+            if row.get("outcome") not in ("PASS", "FAIL", "BLOCKED"):
+                errors.append(f"scenarios[{i}].outcome: expected PASS, FAIL or BLOCKED")
+            for key in ("rids", "evidence"):
+                if not isinstance(row.get(key, []), list) or not all(isinstance(v, str) for v in row.get(key, [])):
+                    errors.append(f"scenarios[{i}].{key}: expected a list of strings")
+            rows.append({"id": row["id"], "rids": row.get("rids", []), "outcome": row.get("outcome"), "run": "live",
+                         "evidence": row.get("evidence", []), "head_sha": head})
+        else:
+            errors.append(f"scenarios[{i}].run: expected live or carried")
+    return rows
+
+
+def _qa_prior_scenarios(path: Path, review_id, branch: str):
+    """Scenarios of the prior receipt by id, or why a carry cannot use it."""
+    try:
+        prior = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return "no prior receipt to carry from"
+    if not isinstance(prior, dict) or prior.get("id") != review_id:
+        return "the prior receipt is for another spec"
+    if prior.get("branch") != branch:
+        return "the prior receipt is from another branch"
+    rows = prior.get("scenarios")
+    return {row["id"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)} if isinstance(rows, list) else {}
+
+
 def cmd_qa_receipt(args: argparse.Namespace) -> None:
     """Persist QA judgment and retain the existing structured finding lineage."""
     if args.skeleton:
         json_output({"id": "fn-1-example", "qa_outcome": "SHIP", "findings": [],
-                     "rid_coverage": {"rids": []}})
+                     "rid_coverage": {"rids": []}, "scenarios": []})
         return
     data = _artifact_payload(args)
     errors = []
@@ -26427,24 +26524,28 @@ def cmd_qa_receipt(args: argparse.Namespace) -> None:
         errors.append("rid_coverage: expected an object with a rids list")
     else:
         for i, row in enumerate(coverage.get("rids", [])):
-            if not isinstance(row, dict) or not isinstance(row.get("id"), str) or row.get("coverage") not in ("live", "subtracted", "no_live_scenario", "backend_cli"):
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str) or row.get("coverage") not in ("live", "subtracted", "carried", "no_live_scenario", "backend_cli"):
                 errors.append(f"rid_coverage.rids[{i}]: invalid id or coverage")
     mode = data.get("mode") or ("receipt" if args.receipt or os.environ.get("REVIEW_RECEIPT_PATH") else "interactive")
     if not isinstance(mode, str):
         errors.append("mode: expected a string")
-    _artifact_errors(errors, args)
     head = _resolve_review_sha("HEAD")
     if head is None:
         error_exit("qa receipt cannot resolve HEAD", code=2, use_json=args.json)
+    branch = _export_run_git(["branch", "--show-current"])[1].strip()
+    path = Path(args.receipt or os.environ.get("REVIEW_RECEIPT_PATH") or get_flow_dir() / "review-receipts" / f"qa-{review_id}.json")
+    scenarios = _qa_receipt_scenarios(data.get("scenarios"), path, review_id, branch, head, errors)
+    _artifact_errors(errors, args)
     if coverage:
         coverage = {"covered": sum(r["coverage"] != "no_live_scenario" for r in coverage.get("rids", [])),
                     "total": len(coverage.get("rids", [])), "rids": coverage.get("rids", [])}
     verdict = "SHIP" if outcome in ("SHIP", "NA") else "NEEDS_WORK"
-    path = Path(args.receipt or os.environ.get("REVIEW_RECEIPT_PATH") or get_flow_dir() / "review-receipts" / f"qa-{review_id}.json")
     receipt = {"type": "qa_verdict", "id": review_id, "mode": mode, "verdict": verdict,
-               "qa_outcome": outcome, "head_sha": head, "branch": _export_run_git(["branch", "--show-current"])[1].strip(),
+               "qa_outcome": outcome, "head_sha": head, "branch": branch,
                "rid_coverage": coverage, "open_p0p1": [item for item in items if item["severity"] in ("P0", "P1")],
                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if scenarios is not None:
+        receipt["scenarios"] = scenarios
     reason_key = "blocked_reason" if outcome == "BLOCKED" else "na_reason" if outcome == "NA" else None
     if reason_key and data.get(reason_key):
         receipt[reason_key] = data[reason_key]
@@ -33249,7 +33350,7 @@ def _cmd_spec_set_ready(args: argparse.Namespace, *, target: bool) -> None:
 
 
 def cmd_spec_ready(args: argparse.Namespace) -> None:
-    """Mark a spec ready for execution (human-owned gate; fn-58.1)."""
+    """Mark a spec ready for execution (the consent gate; fn-58.1)."""
     _cmd_spec_set_ready(args, target=True)
 
 
@@ -45176,6 +45277,29 @@ def _default_review_base(use_json: bool) -> str:
     )
 
 
+def _completion_review_base(spec_id: str, use_json: bool) -> str:
+    """Resolve an omitted completion-review ``--base`` to the spec's own base.
+
+    The base work recorded for this spec's run, then the chain parent's branch,
+    then the repository's default branch. A record written for another spec,
+    or a branch that no longer resolves, falls through to the next source.
+    """
+    flow_dir = get_flow_dir()
+    try:
+        record = (flow_dir / "tmp" / "spec_base_branch").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        record = ""
+    recorded_spec, _, recorded_base = record.strip().partition(" ")
+    if recorded_spec == spec_id and recorded_base and _resolve_review_sha(recorded_base):
+        return recorded_base
+    parent_branch = evaluate_spec_chain(flow_dir, spec_id, use_json=use_json)["parent_branch"]
+    if parent_branch:
+        for candidate in (f"origin/{parent_branch}", parent_branch):
+            if _resolve_review_sha(candidate):
+                return candidate
+    return _default_review_base(use_json)
+
+
 def _build_backend_review_findings(
     review_text: str,
     *,
@@ -46554,7 +46678,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         )
     )
 
-    base_branch = args.base if hasattr(args, "base") and args.base else "main"
+    base_branch = args.base or _default_review_base(args.json)
     resolved_spec = reg["resolve_spec"](args, None, spec_id=epic_id)
     try:
         reviewed_base_sha, reviewed_head_sha = _capture_review_snapshot(base_branch)
@@ -46869,7 +46993,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         )
     )
 
-    base_branch = args.base if hasattr(args, "base") and args.base else "main"
+    base_branch = args.base or _completion_review_base(epic_id, args.json)
     receipt_path = (
         getattr(args, "receipt", None)
         or os.environ.get("REVIEW_RECEIPT_PATH")
@@ -55675,7 +55799,9 @@ def _add_plan_review_parser(sub, backend: str):
     p.add_argument(
         "--files", help="Optional comma-separated relevant code file paths",
     )
-    p.add_argument("--base", default="main", help="Base branch for context")
+    p.add_argument(
+        "--base", help="Base branch for context (default: the repo's default branch)"
+    )
     p.add_argument("--receipt", help="Receipt file path for session continuity")
     p.add_argument(
         "--force",
@@ -55707,7 +55833,11 @@ def _add_completion_review_parser(sub, backend: str):
         help="Require a scoped local execution provider before reserving a review",
     )
     p.add_argument("epic", help="Spec ID (e.g., fn-1, fn-1-add-auth)")
-    p.add_argument("--base", default="main", help="Base branch for diff")
+    p.add_argument(
+        "--base",
+        help="Base branch for diff (default: the spec's recorded base, its chain "
+        "parent's branch, then the repo's default branch)",
+    )
     p.add_argument("--receipt", help="Receipt file path for session continuity")
     p.add_argument(
         "--force",
@@ -55810,6 +55940,10 @@ def main() -> None:
     p_judge.add_argument("--role-model", help="Model pinned by the dispatched role")
     p_judge.add_argument("--can-spawn-model", action="store_true", help="Host supports native model selection")
     p_judge.add_argument("--can-bridge", action="store_true", help="Host verified bridge reach")
+    p_judge.add_argument("--effort-levels", help="Worker spawn's effort levels, lowest first, comma-separated")
+    p_judge.add_argument("--default-effort", help="Effort a worker spawn without one runs at")
+    p_judge.add_argument("--explicit-effort", help="Effort the invocation or routing block names")
+    p_judge.add_argument("--role-effort", help="Effort pinned by the dispatched role")
     p_judge.add_argument("--json", action="store_true", help="JSON output")
     p_judge.set_defaults(func=cmd_judge)
 
@@ -58003,11 +58137,11 @@ def main() -> None:
         p_close.add_argument("--json", action="store_true", help="JSON output")
         p_close.set_defaults(func=cmd_spec_close)
 
-        # fn-58.1 (R2): human-owned readiness gate. Lazy on-disk — the sidecar
+        # fn-58.1 (R2): the readiness (consent) gate. Lazy on-disk — the sidecar
         # carries `ready` only after a toggle changes state; both verbs are
         # idempotent no-ops when the value already matches.
         p_ready = parent_sub.add_parser(
-            "ready", help=f"Mark {noun} ready for execution (human-owned gate)"
+            "ready", help=f"Mark {noun} ready for execution (consent gate: a person, or a goal run for a child it minted)"
         )
         p_ready.add_argument(
             "id", help=f"{noun.capitalize()} ID (e.g., fn-1, fn-1-add-auth)"

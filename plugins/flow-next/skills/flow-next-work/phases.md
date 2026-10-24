@@ -80,7 +80,7 @@ Only when the spec's `depends_on_epics` (in `$FLOWCTL show <spec-id> --json`) is
 the fence prints `BLOCKED:`: read [references/chained-spec.md](references/chained-spec.md).
 
 ```bash
-# fence:work-branch — inputs: FLOWCTL, SPEC_ID, BRANCH_NAME, BRANCH_MODE (new|current), DEFAULT_BASE (optional; defaults to origin/HEAD); origin reachable
+# fence:work-branch — inputs: FLOWCTL, SPEC_ID, BRANCH_NAME, BRANCH_MODE (new|current), DEFAULT_BASE (optional, from --base; defaults to origin/HEAD); origin reachable
 branch_git() {
   local output
   output=$(git "$@" 2>&1) || { printf "BLOCKED: git %s: %s\n" "$*" "$output" >&2; exit 2; }
@@ -92,8 +92,11 @@ CHAIN_PARENT_BRANCH=$(printf '%s' "$CHAIN_JSON" | jq -r '.parent_branch // empty
 if [[ "$(printf '%s' "$CHAIN_JSON" | jq -r '.eligible')" != "true" ]]; then
   echo "BLOCKED: $(printf '%s' "$CHAIN_JSON" | jq -r '.reason')"; exit 2
 fi
+if [[ -n "$CHAIN_PARENT" && -n "${DEFAULT_BASE:-}" ]]; then
+  echo "BLOCKED: --base $DEFAULT_BASE conflicts with chain parent $CHAIN_PARENT, whose branch $CHAIN_PARENT_BRANCH is this spec's base"; exit 2
+fi
 if [[ -n "$CHAIN_PARENT" ]]; then
-  git fetch -q origin "refs/heads/$CHAIN_PARENT_BRANCH:refs/remotes/origin/$CHAIN_PARENT_BRANCH" \
+  git fetch -q origin "refs/heads/${CHAIN_PARENT_BRANCH}:refs/remotes/origin/${CHAIN_PARENT_BRANCH}" \
     || { echo "BLOCKED: cannot fetch parent branch $CHAIN_PARENT_BRANCH from origin"; exit 2; }
   BASE_BRANCH="origin/$CHAIN_PARENT_BRANCH"
 else
@@ -144,6 +147,7 @@ case "$BRANCH_MODE" in
 esac
 mkdir -p .flow/tmp || { echo "BLOCKED: cannot create .flow/tmp"; exit 2; }
 branch_git merge-base HEAD "$BASE_BRANCH" > .flow/tmp/spec_base || exit 2
+printf '%s %s\n' "$SPEC_ID" "$BASE_BRANCH" > .flow/tmp/spec_base_branch || exit 2
 rm -f .flow/tmp/spec_base_repos   # sibling bases are per run; recorded below
 ```
 
@@ -153,7 +157,7 @@ Based on the resolved branch mode (`BRANCH_MODE`):
 - **New branch**: the fence's `new` arm - from `origin/<parent_branch>` on a chained spec (carrying the spec's own tracked `.flow/specs/<id>.*` and `.flow/tasks/<id>.*` files from the pre-checkout commit when the start point lacks them or holds an older version, as one bookkeeping commit), else the resolved default base (refreshed from origin when remote). Existing task branches are checked out unchanged.
 - **Current branch**: proceed; on a chained spec the fence's `current` arm requires the parent tip in the branch's ancestry and blocks naming the missing ancestry otherwise.
 
-The fence persists the SPEC-RUN BASE once (`git merge-base HEAD "$BASE_BRANCH" > .flow/tmp/spec_base`); the base is the run's `BASE_BRANCH`, never a hard-coded `origin/main`. Like the worker `BASE_COMMIT`, bash variables do not survive across tool calls, so later phases re-read this persisted base via `$(cat .flow/tmp/spec_base)`. Capture it once at branch setup; Phase 4 uses it for classify calls and the auditor dispatch. When the spec changes code in git repos beside this one (the project instructions or the spec name them): read [references/multi-repo-base.md § Phase 2](references/multi-repo-base.md#phase-2). Publication is unchanged: the spec branch is pushed as today, and no PR exists until make-pr, which detects the chain from history (`flow-next-make-pr/workflow.md` Phase 0).
+The fence persists the SPEC-RUN BASE once (`git merge-base HEAD "$BASE_BRANCH" > .flow/tmp/spec_base`); the base is the run's `BASE_BRANCH`, never a hard-coded `origin/main`. Like the worker `BASE_COMMIT`, bash variables do not survive across tool calls, so later phases re-read this persisted base via `$(cat .flow/tmp/spec_base)`. Capture it once at branch setup; Phase 4 uses it for classify calls and the auditor dispatch. The fence also records the spec id and the base branch's name (`.flow/tmp/spec_base_branch`), which completion review reads to diff against this spec's base when no base is passed. When the spec changes code in git repos beside this one (the project instructions or the spec name them): read [references/multi-repo-base.md § Phase 2](references/multi-repo-base.md#phase-2). Publication is unchanged: the spec branch is pushed as today, and no PR exists until make-pr, which detects the chain from history (`flow-next-make-pr/workflow.md` Phase 0).
 
 Done when: `spec chain` reported `eligible: true`, the run is on the branch the choice named (under autonomy, exactly the spec's `branch_name`; on a chained spec created from `origin/<parent_branch>`), and `.flow/tmp/spec_base` holds the merge-base with the run's base.
 
@@ -194,7 +198,9 @@ here, inline.** Print `Scheduling: inline (single task)`.
    section when step 7 ran a completion review that returned SHIP; otherwise nothing fires.
 3. **Implement** to the acceptance criteria, following working-rules.md: a failing test first
    where cheap (on the defect route, [references/defect-route.md](references/defect-route.md); on
-   the hill-climb route, [references/hill-climb.md](references/hill-climb.md) replaces this step),
+   the hill-climb route, [references/hill-climb.md](references/hill-climb.md) replaces this step;
+   a measured slowness moved once is measured per
+   [measured-numbers.md](../../references/measured-numbers.md)),
    one focused test per criterion and per enumerated error case, the focused tests for the code
    you changed. Never weaken a test, gate or assertion to make the change pass; a gate you believe
    is wrong is `BLOCKED: TOOLING_FAILURE`. Do not edit `.flow/features/`.
@@ -232,7 +238,7 @@ here, inline.** Print `Scheduling: inline (single task)`.
 After all tasks complete:
 
 - When `.flow/features/` exists, once all tasks are done, run [references/feature-map-update.md](references/feature-map-update.md) first: it updates the feature files whose user route this change altered.
-- Run `$FLOWCTL gate classify --base "$(cat .flow/tmp/spec_base)"`; exit 0 means docs-only tier-B: run lint/format only and note `Gates: docs-only tier-B` for the Phase 5 final summary. On nonzero, run the full gates only when the repository's instructions or the user ask for a full suite: once, here, and not again after later fixes (re-check those with focused tests). When nobody asked, note `Gates: focused (full suite not requested)`; that is the normal outcome, not a gap to fill. A full gate that already ran this run (rolling quiesce, the wave join) is not run again here. When `.flow/tmp/spec_base_repos` exists: read
+- Run `$FLOWCTL gate classify --base "$(cat .flow/tmp/spec_base)"`; exit 0 means docs-only tier-B: run lint/format only and note `Gates: docs-only tier-B` for the Phase 5 final summary. On nonzero, run a full gate only when the user or the repository's instructions ask for one: a command the instructions say to run when work is finished (a session-completion or definition-of-done checklist, or before committing, pushing or opening a PR) is such an ask, whatever the wording, and runs as written; a command they only list is not. Read those sections of the instructions instead of searching them for keywords. Run it once, here, and not again after later fixes (re-check those with focused tests). When nobody asked, note `Gates: focused (full suite not requested)`; that is the normal outcome, not a gap to fill. A full gate that already ran this run (rolling quiesce, the wave join) is not run again here. When `.flow/tmp/spec_base_repos` exists: read
   [references/multi-repo-base.md § Phase 4](references/multi-repo-base.md#phase-4) as well.
 - Only when a full gate (test) command is about to run here: read
   [references/full-gate-receipts.md](references/full-gate-receipts.md) first.

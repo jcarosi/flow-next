@@ -155,6 +155,8 @@ Works out of the box for parallel branches. No setup required.
 
 Nothing under `.flow/` is a copy of the CLI: flowctl runs from the plugin install (`scripts/flowctl` on Unix-like shells, `scripts/flowctl.cmd` under cmd.exe / PowerShell), and the agent guide plus the spec-template scaffold resolve through the bundled cascade. Both launchers resolve Python by **probing functionality and the 3.11 minimum** (order `$PYTHON_BIN` → `py -3` → `python3` → `python`), so the Windows Microsoft Store `python3` alias stub and working-but-too-old interpreters are skipped before source loading. They ship with the plugin, so a plugin update is the whole fix - see [`platforms.md` → Windows: Python discovery](platforms.md#windows-python-discovery).
 
+A host that runs flow-next with its own flowctl sets `FLOW_NEXT_FLOWCTL` to that executable's absolute path. Both launchers (`flowctl` and `flowctl.cmd`) then hand every call to it before probing for Python. Skills still resolve the plugin's launcher, so helpers they locate beside it keep working. If the system cannot run what `FLOW_NEXT_FLOWCTL` names, the launcher exits with an error instead of falling back to the bundled flowctl, so two implementations never write to one repo. Setting it to the launcher itself has no effect. `FLOW_NEXT_FLOWCTL` must point at the replacement flowctl itself, not a wrapper that calls back into the plugin's launcher.
+
 Pre-1.0 layout had spec JSON sidecars at `.flow/epics/fn-N-slug.json` (the markdown was already at `.flow/specs/fn-N-slug.md`). Port by hand via `flowctl usage` "Pre-1.0 layout porting" (and [`troubleshooting.md`](troubleshooting.md)); there is no automated migration.
 
 Flowctl accepts schema v1 and v2 (and v3 post-migration); new fields are optional and defaulted.
@@ -518,7 +520,7 @@ is refused.
 
 ### spec ready / spec unready
 
-Mark / clear the spec's human-owned readiness gate. Readiness is orthogonal to `status` - a ready spec stays `open` through planning and work, and `done` specs may be toggled.
+Mark / clear the spec's readiness gate, which a person sets (a `flow --goal` run also sets it for a child it minted). Readiness is orthogonal to `status` - a ready spec stays `open` through planning and work, and `done` specs may be toggled.
 
 ```bash
 flowctl spec ready fn-1 [--json]
@@ -1243,7 +1245,12 @@ over 32k tokens at four characters per token is rejected without sending.
 The command never writes state, answers, or credentials to disk.
 
 `--task` assembles tier inputs from the task and returns `tier_line`,
-`spawn_model` and `implementer`. Unknown tasks fail.
+`spawn_model`, `spawn_effort` and `implementer`. Unknown tasks fail. For a worker
+the caller passes the host facts `--effort-levels <lowest,...,highest>` and
+`--default-effort <level>`, plus `--explicit-effort` or `--role-effort` when one
+applies; `spawn_effort` is the level for the spawn's effort parameter, or null
+for the host default. A bridged implementer carries the effort as
+`<model> at <effort>` in `implementer`.
 
 `--spec` assembles route facts from the live spec and repository. A failed
 PR probe returns `pr_probe_failed: true` and no `decision`, so the caller
@@ -1316,7 +1323,7 @@ flowctl config set memory.enabled false [--json]
 | `tracker.staleAfterHours` | int | `24` | Staleness threshold (hours) consumed by `sync list-stale`. |
 | `tracker.conflictTiebreak` | string | `always-ask` | Status who-wins tiebreak: `flow-wins | tracker-wins | always-ask`. Strict enum: invalid CLI writes are rejected, and malformed persisted values return runtime `INVALID_INPUT` before status claims or lifecycle sequence work. In autonomous mode `always-ask` resolves to *queue*, not prompt. |
 | `tracker.readyState` | string | `null` | **Readiness projection.** The tracker workflow state that means "ready for work" - a Linear workflow-state **name** or a **Jira status name** (both matched case-insensitive/trimmed against `status.raw`; names, not `state.type` - a custom "Ready" state is typically `type=unstarted`, indistinguishable from Todo by type alone; the Jira name is used RAW in the promoted-lane JQL, validated to exist at ceremony time), or a GitHub / GitLab **label** (pre-created at ceremony time; label present ⇒ ready, absent ⇒ not ready - a normal state, never an error). Set by the `/flow-next:tracker-sync` discovery ceremony (optional, skippable). When set, every pull-side sync projects the state onto the local spec `ready` flag - **one-way, tracker → local; the tracker is authoritative** (a local `spec ready` is overwritten on the next sync, and capture/refine's mark-ready prompt is gated off). A single scalar at the tracker top level (sibling of `conflictTiebreak`), not under `perTracker`. `null` = projection off (readiness gate dormant); clear with `flowctl config set tracker.readyState null` (the literal `null` token is stored as JSON null, not the string). |
-| `land.patienceMinutes` | int | `10` | Minutes since the last push to wait, so review bots can post, when calling flow authorizes merging without a human's current in-session merge authorization. A human's current authorization waives the wait. Unknown push time holds. |
+| `land.patienceMinutes` | int | `10` | Minutes since the last authored push (a catch-up of the base does not count) to wait, so review bots can post, when calling flow authorizes merging without a human's current in-session merge authorization. A human's current authorization waives the wait. Unknown push time holds. |
 | `land.mergeVerdictCommand` | string or `null` | `""` | Optional command, run once per invocation after the other merge gates pass, with a 600-second bound. Exit 0 allows merging; any non-zero result, missing/unexecutable command or timeout blocks. Runs in the invoking repository without switching its checkout; judge the remote `FLOW_HEAD_SHA`, not local HEAD. Environment also supplies `FLOW_BASE_REF`, `FLOW_PR_NUMBER`, `FLOW_SPEC_ID` (empty for multiple matches), and space-separated `FLOW_SPEC_IDS`. Dry-run never executes it. Unset, null and empty disable it. See [Landing upgrade](#landing-upgrade). |
 | `pipeline.qa` | `off \| on \| auto` | `off` | **Optional live QA stage.** Set with `flowctl config set pipeline.qa <off\|on\|auto>`; what each value does, and the skip line a skipped stage records, is in [`gate-selection.md`](../../skills/flow-next-flow/references/gate-selection.md), which attended flow and `flow --auto` both read. This is a **string-enum** knob, **NOT a bool**; **any other value, including bool `true`, is OFF**. flowctl only stores the knob; the QA stage is host-agent skill wiring (no new subcommand/engine). |
 | `chart.maxDecisions` | int | `12` | **Chart size ceiling.** Charting-time only: `chart create --initial-map-file` refuses past this count without `--force-size --reason` (audited: actor, ceiling, proposed count, timestamp, reason). Later sharpening from Open Questions may grow past it. |
@@ -1678,8 +1685,12 @@ flowctl qa receipt --from-json qa.json [--receipt receipt.json] --json
 ```
 
 The payload supplies `id`, `qa_outcome`, findings and R-ID coverage; optional
-mode and BLOCKED/NA reasons are host-authored. The command derives commit,
-branch, timestamps, counts and prior-finding lineage, then writes atomically.
+mode, BLOCKED/NA reasons and per-scenario outcomes are host-authored. The command
+derives commit, branch, timestamps, counts and prior-finding lineage, then writes
+atomically. Live scenarios are stamped with the current head. A scenario recorded
+as `{"id": ..., "run": "carried"}` copies its outcome, R-IDs, evidence and head
+from the prior receipt at the same path; a carry from another spec or branch, or
+of a scenario that did not pass there, is refused.
 BLOCKED or NA does not close unobserved prior findings. Invalid payloads report
 all errors without replacing the previous receipt. QA resolves unattended
 target and account prerequisites before deriving scenarios.
@@ -2996,7 +3007,7 @@ those conditions can allow the authorized merge. Tighten this in three ways:
    judge `FLOW_HEAD_SHA`; the invoking checkout may be on another branch.
    A non-zero result, unavailable command or timeout blocks the merge.
 
-`land.patienceMinutes` defaults to 10 minutes since the last push when
+`land.patienceMinutes` defaults to 10 minutes since the last authored push when
 calling flow authorizes the merge without a human's current in-session merge
 authorization. A human's current authorization waives that wait. The command
 and environment contract is in the [configuration table](#config).
