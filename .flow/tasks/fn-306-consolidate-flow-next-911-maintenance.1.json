@@ -9,7 +9,7 @@
   "priority": 1,
   "spec": "fn-306-consolidate-flow-next-911-maintenance",
   "spec_path": ".flow/tasks/fn-306-consolidate-flow-next-911-maintenance.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Integrate qualified Flow 9.1.1 adaptations and validate safe release",
   "updated_at": "2026-10-24T07:38:38.209802Z"
 }
