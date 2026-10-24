@@ -8,13 +8,51 @@
   "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-306-consolidate-flow-next-911-maintenance",
-  "impl_review_rounds": {},
+  "impl_review_rounds": {
+    "fn-306-consolidate-flow-next-911-maintenance.1": 0
+  },
   "next_task": 1,
   "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
-  "ready": true,
+  "ready": false,
+  "review_attempts": [
+    {
+      "artifact_sha256": "3a7335f8cdf4e0e6f319d0758da1b5c470115dc156034e3b182e11de41e8ea04",
+      "backend": "claude",
+      "base_sha": "6236e0d6142ec0ceaefab8701d5c55bf8dc905ba",
+      "counter_kind": "impl",
+      "failure_class": "nonzero_exit",
+      "failure_message": "Available Model Group Fallbacks=None",
+      "finalized": {
+        "digest": "not_applicable",
+        "receipt": "not_applicable",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "f5749469c859cd2f84e9484e3b624f8b2387087e",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "outcome": "transport_failure",
+      "output_bytes": 225,
+      "output_sha256": "d1354b38a97f071e2b45b2e5855f8f4003179185cfa6b5988b9083611a6f7757",
+      "reservation_id": "e326715ad7fd452b8b9309db8daffae3",
+      "round_consumed": false,
+      "scope": "impl:fn-306-consolidate-flow-next-911-maintenance.1",
+      "superseded_by": null,
+      "task": "fn-306-consolidate-flow-next-911-maintenance.1",
+      "timestamp": "2026-10-24T08:28:02.713454Z",
+      "verdict": null
+    }
+  ],
+  "review_hash_epoch": {},
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-306-consolidate-flow-next-911-maintenance.1": 1
+  },
   "spec_path": ".flow/specs/fn-306-consolidate-flow-next-911-maintenance.md",
   "status": "open",
   "title": "Consolidate Flow-Next 9.1.1 maintenance safely",
@@ -29,5 +67,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-24T07:38:37.582211Z"
+  "updated_at": "2026-10-24T08:31:02.816550Z"
 }

@@ -26,8 +26,23 @@ Publish only a validated, fast-forward update to the verified fork destination.
 
 
 ## Done summary
-TBD
+Blocked:
+The required independent review gate R6 is unmet. The official initial integrated panel for `6236e0d6142ec0ceaefab8701d5c55bf8dc905ba..f5749469c859cd2f84e9484e3b624f8b2387087e` was dispatched through `claude:qwen-l40s:medium` and exited with code 2. All three native reviewer contexts ended with API 400 `ContextWindowExceededError`; the panel produced no verdict. The reserved round was refunded and consumed zero tokens. No context reset, retry, model or harness fallback, or alternate review route was used.
 
+Source validations and local safety gates are green, but they do not satisfy R6. The independent implementation review has no valid verdict, and the required independent specification-completion review is therefore not complete. Keep the source unpublished and defer active installation until the required reviews succeed against the final candidate SHA. The candidate pin remains provisional.
+
+Evidence is in `.git/maintenance/20261024/maintenance-review-dispatch.log`, `.git/maintenance/20261024/review-runtime-evidence.json`, and the three native reviewer profiles under `.git/maintenance/20261024/reviewer-claude/projects/-Users-julien-Worktrees-flow-next-maintenance-20261024/` (`bc0b0629-ec20-43b8-bf26-fe1ba804be9f.jsonl`, `d50f9504-ca68-42f8-8831-744563baef08.jsonl`, and `0ffff298-c520-4256-8f55-0d26fca59fc7.jsonl`).
+
+This review infrastructure failure does not implicate OAP or its FN-60 protective stop. OAP was not changed or used for this review. Qwen analytical fixes and benchmark work remain outside this maintenance scope.
+
+Blocked:
+The required independent review gate R6 is unmet. The official initial integrated panel for `6236e0d6142ec0ceaefab8701d5c55bf8dc905ba..f5749469c859cd2f84e9484e3b624f8b2387087e` was dispatched through `claude:qwen-l40s:medium` and exited with code 2. All three native reviewer contexts ended with API 400 `ContextWindowExceededError`; the panel produced no verdict. The reserved review round was refunded; the task has zero consumed implementation-review rounds. Native provider token usage was not aggregated for this maintenance report. No context reset, retry, model or harness fallback, or alternate review route was used.
+
+Source validations and local safety gates are green, but they do not satisfy R6. The independent implementation review has no valid verdict, and the required independent specification-completion review is therefore not complete. Keep the source unpublished and defer active installation until the required reviews succeed against the final candidate SHA. The candidate pin remains provisional.
+
+Evidence is in `.git/maintenance/20261024/maintenance-review-dispatch.log`, `.git/maintenance/20261024/review-runtime-evidence.json`, and the three native reviewer profiles under `.git/maintenance/20261024/reviewer-claude/projects/-Users-julien-Worktrees-flow-next-maintenance-20261024/` (`bc0b0629-ec20-43b8-bf26-fe1ba804be9f.jsonl`, `d50f9504-ca68-42f8-8831-744563baef08.jsonl`, and `0ffff298-c520-4256-8f55-0d26fca59fc7.jsonl`).
+
+This review infrastructure failure does not implicate OAP or its FN-60 protective stop. OAP was not changed or used for this review. Qwen analytical fixes and benchmark work remain outside this maintenance scope.
 ## Evidence
 - Commits:
 - Tests:
