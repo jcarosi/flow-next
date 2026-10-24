@@ -1,4 +1,4 @@
-"""Copilot's opt-in frozen diff delivery through the registered adapter."""
+"""Copilot's frozen diff delivery through the registered adapter."""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ class CopilotDiffDelivery(unittest.TestCase):
             resolution_out={}, args=args,
         )
 
-    def test_default_native_and_config_writes(self) -> None:
+    def test_default_and_config_values_write_exact_pinned_files(self) -> None:
         self.assertEqual(flowctl.get_default_config()["review"]["copilotDiffDelivery"], "native")
         for invalid in ("typo", "File", "true", "null", "1"):
             with _flow_repo():
@@ -102,11 +102,18 @@ class CopilotDiffDelivery(unittest.TestCase):
             with self.subTest(policy=policy), _flow_repo() as (repo, base), _fake_copilot() as calls:
                 if policy:
                     _policy(repo, policy)
+                head = _git(repo, "rev-parse", "HEAD")
                 code, out, err = _primary(base, repo / "receipt.json")
                 self.assertEqual(code, 0, out + err)
                 self.assertEqual(len(calls), 1)
-                self.assertFalse(calls[0]["files"])
-                self.assertNotIn("## Diff delivery", calls[0]["prompt"])
+                self.assertEqual(len(calls[0]["files"]), 1)
+                (path,) = calls[0]["files"]
+                self.assertIn("## Diff delivery (copilot backend)", calls[0]["prompt"])
+                self.assertIn(str(path), calls[0]["prompt"])
+                self.assertEqual(
+                    path.read_text(encoding="utf-8"),
+                    _git_raw(repo, "diff", f"{base}..{head}"),
+                )
                 self.assertIn("git diff", calls[0]["prompt"])
                 argv = calls[0]["argv"]
                 denied_tools = [
@@ -116,7 +123,7 @@ class CopilotDiffDelivery(unittest.TestCase):
                 ]
                 self.assertEqual(denied_tools, ["write", "shell"])
                 self.assertEqual(argv[argv.index("--model") + 1], "qwen-l40s")
-                self.assertEqual(argv[argv.index("--effort") + 1], "medium")
+                self.assertEqual(argv[argv.index("--reasoning-effort") + 1], "medium")
 
     def test_primary_rereview_and_completion_routes_use_exact_pinned_files(self) -> None:
         with _flow_repo() as (repo, base), _fake_copilot() as calls:

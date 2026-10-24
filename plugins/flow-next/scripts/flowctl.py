@@ -4156,7 +4156,10 @@ def _dispatch_review_with_fallback(
     ``--model``). ``version_fn`` returns the CLI version for the cache key and is
     called LAZILY — never on the pristine happy path. ``list_available`` (cursor
     only) returns the CLI's live model list, consulted once on the top-model
-    failure. ``resolution_out``, when given, is populated with ``{"model":
+    failure. Only exit-zero fallback executions are cached; a cached routing
+    choice that later exits nonzero is invalidated. A terminal failure is
+    returned as-is, while the distinctive unavailable signature still permits
+    a fresh ladder resolution. ``resolution_out``, when given, is populated with ``{"model":
     <used>, "floor": <bool>}`` so the caller can record the actually-used model
     on the receipt.
     """
@@ -4218,9 +4221,13 @@ def _dispatch_review_with_fallback(
     if cached is not None:
         if cached == _MODEL_CACHE_FLOOR:
             out, sid, rc, err = dispatch(floor_model, True)
+            if rc != 0:
+                _model_cache_invalidate(repo_root, backend, _ver(), cache_intent)
             return _resolved(out, sid, rc, err, floor_model, True)
         out, sid, rc, err = dispatch(cached, False)
         if rc == 0 or not is_unavailable(out, err):
+            if rc != 0:
+                _model_cache_invalidate(repo_root, backend, _ver(), cache_intent)
             return _resolved(out, sid, rc, err, cached, False)
         # A cached model that now fails the signature (org revoked it mid-version)
         # → drop it and re-resolve fresh from the ranking top. Self-healing.
@@ -4239,14 +4246,16 @@ def _dispatch_review_with_fallback(
         if best is not None:
             out, sid, rc, err = dispatch(best, False)
             if rc == 0 or not is_unavailable(out, err):
-                _model_cache_put(repo_root, backend, _ver(), cache_intent, best)
-                _warn_model_resolution(backend, top, best, floor=False)
+                if rc == 0:
+                    _model_cache_put(repo_root, backend, _ver(), cache_intent, best)
+                    _warn_model_resolution(backend, top, best, floor=False)
                 return _resolved(out, sid, rc, err, best, False)
         out, sid, rc, err = dispatch(floor_model, True)
-        _model_cache_put(
-            repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR
-        )
-        _warn_model_resolution(backend, top, floor_model, floor=True)
+        if rc == 0:
+            _model_cache_put(
+                repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR
+            )
+            _warn_model_resolution(backend, top, floor_model, floor=True)
         return _resolved(out, sid, rc, err, floor_model, True)
 
     # Codex / copilot: step DOWN the ranking, at most ``max_steps`` steps, then
@@ -4256,32 +4265,27 @@ def _dispatch_review_with_fallback(
             break
         out, sid, rc, err = dispatch(model, False)
         if rc == 0 or not is_unavailable(out, err):
-            if idx > 0:
+            if idx > 0 and rc == 0:
                 _model_cache_put(repo_root, backend, _ver(), cache_intent, model)
                 _warn_model_resolution(backend, top, model, floor=False)
             return _resolved(out, sid, rc, err, model, False)
     out, sid, rc, err = dispatch(floor_model, True)
-    _model_cache_put(repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR)
-    _warn_model_resolution(backend, top, floor_model, floor=True)
+    if rc == 0:
+        _model_cache_put(repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR)
+        _warn_model_resolution(backend, top, floor_model, floor=True)
     return _resolved(out, sid, rc, err, floor_model, True)
 
 
-def _effort_reached_cli(backend: str, model: Optional[str]) -> bool:
+def _effort_reached_cli(model: Optional[str]) -> bool:
     """Did the resolved effort actually govern the dispatched run? (#349 r3)
 
     The attempt row must record what was SENT, not what was resolved:
     - a ladder floor (model None) dispatches with CLI defaults - neither
       model nor effort was pinned;
-    - copilot deliberately omits ``--effort`` for ``claude-*`` models
-      (they reject the flag);
-    - cursor bakes effort into the model slug and codex pins it via
-      ``-c`` - both really sent it.
+    - every non-floor backend dispatch sends its resolved effort (Copilot uses
+      ``--reasoning-effort`` for all supported model families).
     """
-    if model is None:
-        return False
-    if backend == "copilot" and model.startswith("claude-"):
-        return False
-    return True
+    return model is not None
 
 
 def _receipt_model_effort(
@@ -7440,7 +7444,7 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
             "gpt-6-astra",  # rolled out to Copilot 2026-09-05 (maintainer-confirmed); the ladder steps down if an org policy withholds it
             "gpt-5.5",
             "gpt-5.4",
-            "claude-fable-5.1",  # rolled out to Copilot 2026-09-05; Claude-family, so --effort is dropped
+            "claude-fable-5.1",  # rolled out to Copilot 2026-09-05
             "claude-opus-5.5",  # GA in the CLI per docs 2026-10-07
             "claude-opus-5",  # GA per docs 2026-07-24 (1M ctx + reasoning levels in CLI)
             "claude-sonnet-5.5",  # GA in the CLI per docs 2026-10-07
@@ -7458,10 +7462,8 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
             "gpt-5-mini",
             "gpt-4.1",
         ],
-        # Copilot exposes ``xhigh`` in addition to standard tiers. No ``none`` /
-        # ``minimal`` — Claude-family models reject ``--effort`` entirely, which
-        # ``run_copilot_exec`` handles by dropping the flag when model starts
-        # with ``claude-``.
+        # Keep Flow-Next's stable review effort set. Every accepted tier is sent
+        # through Copilot's ``--reasoning-effort`` option.
         "efforts": {"low", "medium", "high", "xhigh"},
         "default_model": "gpt-6-astra",  # == models[0] (fn-76 invariant)
         "default_effort": "high",
@@ -8168,9 +8170,9 @@ def run_copilot_exec(
     When ``spec`` is ``None`` (defensive / non-review callers), fall back
     to bare-copilot resolution (env + registry defaults).
 
-    Claude-model effort skip: ``--effort`` is dropped when
-    ``effective_model`` starts with ``claude-`` (Copilot rejects
-    reasoning-effort on Claude-family models).
+    Every non-floor dispatch sends the resolved effort using Copilot's
+    ``--reasoning-effort`` option for both Claude-family and OpenAI-family
+    models.
 
     Returns:
         tuple: (stdout, session_id, exit_code, stderr)
@@ -8205,10 +8207,10 @@ def run_copilot_exec(
     marker.parent.mkdir(parents=True, exist_ok=True)
 
     # fn-76: ONE model per dispatch, driven by the fallback ladder. At the floor
-    # ``model`` is ``"auto"`` and ``--effort`` is omitted (R5). ``--effort`` is
-    # also dropped for Claude-family models (Copilot rejects it) and, since a
-    # failed model-unavailable dispatch never touches the marker, ladder retries
-    # keep using ``--session-id`` until one succeeds.
+    # ``model`` is ``"auto"`` and ``--reasoning-effort`` is omitted (R5). Every
+    # non-floor dispatch sends the resolved effort for all model families.
+    # Since a failed model-unavailable dispatch never touches the marker, ladder
+    # retries keep using ``--session-id`` until one succeeds.
     def _dispatch(model, is_floor):
         common_args = [
             "--output-format",
@@ -8233,8 +8235,8 @@ def run_copilot_exec(
             "--model",
             model,
         ]
-        if not is_floor and not model.startswith("claude-"):
-            common_args += ["--effort", effective_effort]
+        if not is_floor:
+            common_args += ["--reasoning-effort", effective_effort]
 
         session_arg = (
             f"--resume={session_id}" if marker.exists()
@@ -45032,21 +45034,24 @@ def _copilot_run_exec(
                 )
         except ValueError as exc:
             return "", session_id, 2, f"copilot review diff delivery: {exc}"
-        if delivery == "file":
-            base, head, receipt_id = review_range
-            try:
-                diff_path = _claude_materialise_review_diff(
-                    repo_root, receipt_id, base, head
-                )
-            except (ClaudeReviewDiffError, OSError) as exc:
-                return "", session_id, 2, f"copilot review diff: {exc}"
-            prompt += (
-                "\n\n## Diff delivery (copilot backend)\n\n"
-                "This session has no shell: use file tools to read the complete "
-                f"frozen diff for `{base}..{head}` at `{diff_path}` instead of "
-                "running git. Read it yourself; do not delegate this review. "
-                "Repository files remain readable at their normal paths.\n"
+        # Both accepted policy values now use the readable pinned artifact.
+        # The native prompt asks the shell-less reviewer to run git diff, which
+        # the protected Copilot session cannot do. Keep validating the historic
+        # config key, but always deliver the exact range by path.
+        base, head, receipt_id = review_range
+        try:
+            diff_path = _claude_materialise_review_diff(
+                repo_root, receipt_id, base, head
             )
+        except (ClaudeReviewDiffError, OSError) as exc:
+            return "", session_id, 2, f"copilot review diff: {exc}"
+        prompt += (
+            "\n\n## Diff delivery (copilot backend)\n\n"
+            "This session has no shell: use file tools to read the complete "
+            f"frozen diff for `{base}..{head}` at `{diff_path}` instead of "
+            "running git. Read it yourself; do not delegate this review. "
+            "Repository files remain readable at their normal paths.\n"
+        )
     managed = _managed_review_exec(
         prompt, backend="copilot", session_id=session_id, repo_root=repo_root, spec=spec,
         resolution_out=resolution_out, args=args,
@@ -46351,7 +46356,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         # "default" is a selector placeholder, not a resolved model; an
         # explicit auto pin has floor unset and records honestly), and
         # effort rides only when it actually reached the CLI (copilot
-        # omits --effort for claude-* models).
+        # sends reasoning effort through the Copilot-specific flag).
         reviewed_model=(
             None
             if _resolution.get("floor")
@@ -46368,7 +46373,7 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         reviewed_effort=(
             _dispatched_effort
             if not _resolution.get("floor")
-            and _effort_reached_cli(backend, effective_model)
+            and _effort_reached_cli(effective_model)
             else None
         ),
         reservation_id=reservation_id,
@@ -46846,7 +46851,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         # "default" is a selector placeholder, not a resolved model; an
         # explicit auto pin has floor unset and records honestly), and
         # effort rides only when it actually reached the CLI (copilot
-        # omits --effort for claude-* models).
+        # sends reasoning effort through the Copilot-specific flag).
         reviewed_model=(
             None
             if _resolution.get("floor")
@@ -46863,7 +46868,7 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
         reviewed_effort=(
             _dispatched_effort
             if not _resolution.get("floor")
-            and _effort_reached_cli(backend, effective_model)
+            and _effort_reached_cli(effective_model)
             else None
         ),
         reservation_id=reservation_id,
@@ -47191,7 +47196,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         # "default" is a selector placeholder, not a resolved model; an
         # explicit auto pin has floor unset and records honestly), and
         # effort rides only when it actually reached the CLI (copilot
-        # omits --effort for claude-* models).
+        # sends reasoning effort through the Copilot-specific flag).
         reviewed_model=(
             None
             if _resolution.get("floor")
@@ -47208,7 +47213,7 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
         reviewed_effort=(
             _dispatched_effort
             if not _resolution.get("floor")
-            and _effort_reached_cli(backend, effective_model)
+            and _effort_reached_cli(effective_model)
             else None
         ),
         reservation_id=reservation_id,
@@ -50134,7 +50139,8 @@ def _resolve_copilot_review_spec(
 
     Caller uses ``resolved.model`` / ``resolved.effort`` for receipts and
     passes the spec to ``run_copilot_exec`` which honors ``spec.model`` /
-    ``spec.effort`` and still skips ``--effort`` for ``claude-*`` models.
+    ``spec.effort`` and forwards it using ``--reasoning-effort`` for every
+    model family.
     """
     spec_arg = getattr(args, "spec", None)
     if spec_arg:

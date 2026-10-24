@@ -534,6 +534,18 @@ class TestClaudeLadder(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual([_model_of(c) for c in calls if "-p" in c], [CLAUDE_TOP, CLAUDE_SECOND])
 
+    def test_nonzero_stderr_tag_is_terminal(self) -> None:
+        calls: list = []
+        with _repo() as root:
+            out, _sid, rc, err = self._run(
+                root,
+                lambda _model: ("", CLAUDE_UNAVAILABLE_STDERR, 7),
+                calls=calls,
+            )
+        self.assertEqual((out, rc), ("", 7))
+        self.assertIn(CLAUDE_UNAVAILABLE_STDERR, err)
+        self.assertEqual([_model_of(c) for c in calls if "-p" in c], [CLAUDE_TOP])
+
     def test_partial_signature_is_transport_failure_no_step_no_cache(self) -> None:
         # fn-221 R3 negative fixtures: exit-0 error payloads WITHOUT the
         # signature propagate as failures - one dispatch, no cache write.
@@ -1108,6 +1120,203 @@ class TestCache(unittest.TestCase):
             self.assertEqual(
                 set(_cache_models(root).values()), {"keep-model", "new-model"}
             )
+
+
+class TestFallbackCacheRequiresSuccessfulExecution(unittest.TestCase):
+    """A routing choice is reusable only after that model completed successfully."""
+
+    _BACKENDS = ("codex", "copilot", "cursor", "claude")
+    _TOP = {
+        "codex": CODEX_TOP,
+        "copilot": COPILOT_TOP,
+        "cursor": CURSOR_TOP,
+        "claude": CLAUDE_TOP,
+    }
+    _SECOND = {
+        "codex": CODEX_SECOND,
+        "copilot": COPILOT_SECOND,
+        "cursor": BACKEND_REGISTRY["cursor"]["models"][1],
+        "claude": CLAUDE_SECOND,
+    }
+    _THIRD = {
+        "codex": CODEX_THIRD,
+        "copilot": BACKEND_REGISTRY["copilot"]["models"][2],
+        "cursor": BACKEND_REGISTRY["cursor"]["models"][2],
+        "claude": CLAUDE_THIRD,
+    }
+    _FLOOR = {"codex": None, "copilot": "auto", "cursor": "auto", "claude": None}
+
+    def _run(self, backend: str, root: Path, result, calls: list):
+        flowctl._CLI_VERSION_CACHE.clear()
+        with _scripted(
+            flowctl,
+            dispatch_result=result,
+            version="2026.10.11",
+            list_models=[self._SECOND[backend]],
+            calls=calls,
+        ), redirect_stderr(io.StringIO()):
+            spec = BackendSpec(backend)
+            if backend == "codex":
+                return flowctl.run_codex_exec(
+                    "p", sandbox="read-only", spec=spec, repo_root=root
+                )
+            if backend == "copilot":
+                return flowctl.run_copilot_exec("p", "sess", root, spec=spec)
+            if backend == "cursor":
+                return flowctl.run_cursor_exec("p", spec=spec, repo_root=root)
+            return flowctl.run_claude_exec("p", spec=spec, repo_root=root)
+
+    def _dispatches(self, backend: str, calls: list) -> list:
+        if backend == "codex":
+            selected = [call for call in calls if "exec" in call]
+        elif backend == "copilot":
+            selected = [call for call in calls if "--model" in call]
+        elif backend == "cursor":
+            selected = [call for call in calls if "ask" in call]
+        else:
+            selected = [call for call in calls if "-p" in call]
+        return [_model_of(call) for call in selected]
+
+    def _cached_models(self, root: Path) -> list:
+        cache_path = root / ".flow" / ".cache" / "model-resolution.json"
+        if not cache_path.exists():
+            return []
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return [entry["model"] for entry in data.values()]
+
+    def _unavailable(self, backend: str) -> tuple[str, str, int]:
+        if backend == "codex":
+            return CODEX_UNAVAILABLE_STREAM, "", 1
+        if backend == "copilot":
+            return "", COPILOT_UNAVAILABLE_STREAM, 1
+        if backend == "cursor":
+            return CURSOR_UNAVAILABLE_STREAM, CURSOR_UNAVAILABLE_STREAM, 1
+        return CLAUDE_UNAVAILABLE_JSON, "", 0
+
+    def _success(self, backend: str) -> tuple[str, str, int]:
+        if backend == "codex":
+            return CODEX_OK_STREAM, "", 0
+        if backend == "copilot":
+            return "SHIP", "", 0
+        if backend == "cursor":
+            return CURSOR_OK_STREAM, "", 0
+        return CLAUDE_OK_STREAM, "", 0
+
+    def _failure(self, backend: str) -> tuple[str, str, int]:
+        if backend == "claude":
+            return "not json", "", 0
+        return "", "terminal failure", 7
+
+    def test_failed_intermediate_is_not_cached(self) -> None:
+        for backend in self._BACKENDS:
+            with self.subTest(backend=backend), _repo() as root:
+                top, second = self._TOP[backend], self._SECOND[backend]
+
+                def result(model, *, backend=backend, top=top, second=second):
+                    if model == top:
+                        return self._unavailable(backend)
+                    if model == second:
+                        return self._failure(backend)
+                    return self._success(backend)
+
+                calls: list = []
+                _out, _sid, rc, _err = self._run(backend, root, result, calls)
+                self.assertNotEqual(rc, 0)
+                self.assertEqual(self._dispatches(backend, calls), [top, second])
+                self.assertEqual(self._cached_models(root), [])
+
+                calls.clear()
+                self._run(
+                    backend, root,
+                    lambda _model, backend=backend: self._success(backend), calls,
+                )
+                self.assertEqual(self._dispatches(backend, calls), [top])
+
+    def test_failed_floor_is_not_cached_and_top_is_rechecked(self) -> None:
+        for backend in self._BACKENDS:
+            with self.subTest(backend=backend), _repo() as root:
+                top, second, third, floor = (
+                    self._TOP[backend], self._SECOND[backend],
+                    self._THIRD[backend], self._FLOOR[backend],
+                )
+
+                def result(model, *, backend=backend, floor=floor):
+                    return (
+                        self._failure(backend)
+                        if model == floor
+                        else self._unavailable(backend)
+                    )
+
+                calls: list = []
+                _out, _sid, rc, _err = self._run(backend, root, result, calls)
+                self.assertNotEqual(rc, 0)
+                expected = [top, second, floor] if backend == "cursor" else [top, second, third, floor]
+                self.assertEqual(self._dispatches(backend, calls), expected)
+                self.assertEqual(self._cached_models(root), [])
+
+                calls.clear()
+                self._run(
+                    backend, root,
+                    lambda _model, backend=backend: self._success(backend), calls,
+                )
+                self.assertEqual(self._dispatches(backend, calls), [top])
+
+    def test_successful_floor_is_still_cached(self) -> None:
+        for backend in self._BACKENDS:
+            with self.subTest(backend=backend), _repo() as root:
+                floor = self._FLOOR[backend]
+
+                def result(model, *, backend=backend, floor=floor):
+                    return self._success(backend) if model == floor else self._unavailable(backend)
+
+                calls: list = []
+                _out, _sid, rc, _err = self._run(backend, root, result, calls)
+                self.assertEqual(rc, 0)
+                self.assertIn(flowctl._MODEL_CACHE_FLOOR, self._cached_models(root))
+
+    def test_terminal_cached_rung_and_floor_are_invalidated_without_retry(self) -> None:
+        for backend in self._BACKENDS:
+            for cached_floor in (False, True):
+                with self.subTest(backend=backend, cached_floor=cached_floor), _repo() as root:
+                    top, second, floor = (
+                        self._TOP[backend], self._SECOND[backend],
+                        self._FLOOR[backend],
+                    )
+
+                    def successful_fallback(
+                        model,
+                        *,
+                        backend=backend,
+                        cached_floor=cached_floor,
+                        floor=floor,
+                        top=top,
+                    ):
+                        if cached_floor:
+                            return self._success(backend) if model == floor else self._unavailable(backend)
+                        return self._unavailable(backend) if model == top else self._success(backend)
+
+                    self._run(backend, root, successful_fallback, [])
+                    expected_cached = flowctl._MODEL_CACHE_FLOOR if cached_floor else second
+                    self.assertEqual(self._cached_models(root), [expected_cached])
+
+                    calls: list = []
+                    _out, _sid, rc, _err = self._run(
+                        backend, root,
+                        lambda _model, backend=backend: self._failure(backend),
+                        calls,
+                    )
+                    self.assertNotEqual(rc, 0)
+                    cached = floor if cached_floor else second
+                    self.assertEqual(self._dispatches(backend, calls), [cached])
+                    self.assertEqual(self._cached_models(root), [])
+
+                    calls.clear()
+                    self._run(
+                        backend, root,
+                        lambda _model, backend=backend: self._success(backend),
+                        calls,
+                    )
+                    self.assertEqual(self._dispatches(backend, calls), [top])
 
 
 # --- R5: receipt records the actually-used model ---

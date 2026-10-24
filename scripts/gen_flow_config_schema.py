@@ -103,10 +103,10 @@ DESCRIPTIONS: dict[str, str] = {
         "Invalid writes and persisted values are rejected before dispatch."
     ),
     "review.copilotDiffDelivery": (
-        "Copilot primary review diff delivery: native (default) asks Copilot "
-        "to inspect the pinned range with git, while file writes the complete "
-        "frozen diff to a readable artifact path and directs the shell-less "
-        "reviewer to read it. Optional and limited to ranged primary reviews."
+        "Compatibility setting accepting native (default) or file. Ranged "
+        "primary Copilot reviews always write the exact frozen diff to a "
+        "readable artifact path and direct the shell-less reviewer to read it. "
+        "Optional and limited to ranged primary reviews."
     ),
     "review.maxIterations": (
         "Cumulative review-round cap per scope (default 8, minimum 1 - the cap "
