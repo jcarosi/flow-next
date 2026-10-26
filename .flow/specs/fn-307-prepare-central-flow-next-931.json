@@ -1,7 +1,7 @@
 {
   "branch_name": "maintenance/central-9.3.1-20261026",
-  "completion_review_status": "unknown",
-  "completion_reviewed_at": null,
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-10-26T14:04:47.657402Z",
   "created_at": "2026-10-26T12:47:44.128391Z",
   "default_impl": null,
   "default_review": null,
@@ -111,18 +111,56 @@
       "task": "fn-307-prepare-central-flow-next-931.1",
       "timestamp": "2026-10-26T13:52:38.919148Z",
       "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "686b848fdae1f773e2e7202b0ee8d42388e6931e2b1b0376731cb60328d8dbe4",
+      "backend": "codex",
+      "base_sha": "9f117ed905a83aed9e51c2320921acba66bc79de",
+      "counter_kind": "plan",
+      "effort": "xhigh",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "completion"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "3f1459ff8d51dbe422ed58614c1a737633f6695e",
+      "head_sha_observed": true,
+      "kind": "completion",
+      "model": "gpt-6.1-sol",
+      "outcome": "verdict",
+      "output_bytes": 380663,
+      "output_sha256": "525c58c911951e813c815ffba035fe261e71d87dd8d4e78a636b9257f1270523",
+      "reservation_id": "bcf0d10d900a42e6a4e37c50d6e73da2",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-10-26T14:04:47.649811Z",
+      "tool_calls": 19,
+      "verdict": "SHIP"
     }
   ],
   "review_hash_epoch": {
-    "impl:fn-307-prepare-central-flow-next-931.1": 2
+    "impl:fn-307-prepare-central-flow-next-931.1": 2,
+    "plan#completion": 1
   },
   "review_pending_rounds": {},
   "review_reservations": {},
   "review_transport_failures": {
+    "completion": 0,
     "impl:fn-307-prepare-central-flow-next-931.1": 0
   },
   "spec_path": ".flow/specs/fn-307-prepare-central-flow-next-931.md",
-  "status": "open",
+  "status": "done",
   "title": "Prepare central Flow-Next 9.3.1 synchronization safely",
   "tracker": {
     "baseHashFlow": null,
@@ -135,5 +173,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-26T13:52:38.921793Z"
+  "updated_at": "2026-10-26T14:08:28.549015Z"
 }

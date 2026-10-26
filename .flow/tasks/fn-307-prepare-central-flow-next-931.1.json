@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-307-prepare-central-flow-next-931",
   "spec_path": ".flow/tasks/fn-307-prepare-central-flow-next-931.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Integrate and validate isolated 9.3.1 candidate",
   "updated_at": "2026-10-26T12:47:49.481361Z"
 }
