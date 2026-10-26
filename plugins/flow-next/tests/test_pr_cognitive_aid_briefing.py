@@ -140,6 +140,22 @@ class BriefingTests(unittest.TestCase):
                           if record["attentionClass"] != "canonical"]
         self.assertIn("Safe to skim: 3. Validate and render", render(value))
 
+    def test_empty_canonical_summaries_keep_group_guidance_visible(self):
+        value = artifact()
+        group = value["changeWalkthrough"]["groups"][2]
+        group["summary"] = "canonical-group-guidance-sentinel"
+        for record in group["files"]:
+            if record["attentionClass"] == "canonical":
+                record["summary"] = ""
+
+        text = render(value)
+
+        self.assertIn("**3. Validate and render** [R6]", text)
+        self.assertIn("canonical-group-guidance-sentinel", text)
+        self.assertNotIn("Safe to skim: 3. Validate and render", text)
+        self.assertIn("Safe to skim: ` plugins/flow-next/codex/generated.md `; "
+                      "` dist/bundled_tool.py `", text)
+
     def test_uncovered_requirement_is_one_line(self):
         value = artifact()
         self.assertNotIn("Uncovered", render(value))
@@ -152,6 +168,17 @@ class BriefingTests(unittest.TestCase):
         row = value["changeWalkthrough"]["groups"][2]["files"][0]
         row.update(rIds=["R7"], sourceRefs=["diff", "task", "second"])
         text = render(value)
+        self.assertIn("**3. Validate and render** [R6, R7]", text)
+        self.assertNotIn("Uncovered", text)
+
+    def test_file_only_rid_source_ref_remains_in_group_tag(self):
+        value = artifact()
+        value["sources"].append({"id": "file-rid", "kind": "rid", "ref": "R7"})
+        row = value["changeWalkthrough"]["groups"][2]["files"][0]
+        row.update(rIds=[], sourceRefs=[*row["sourceRefs"], "file-rid"])
+
+        text = render(value)
+
         self.assertIn("**3. Validate and render** [R6, R7]", text)
         self.assertNotIn("Uncovered", text)
 

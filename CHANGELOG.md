@@ -12,6 +12,7 @@ Flow-Next changed shape with 5.0.0. One command, `/flow-next:flow`, reads whatev
 
 ### Fixed
 
+- **PR briefings retain canonical group guidance when file summaries are empty and keep file-backed R-IDs visible in reading order.** Only groups made entirely of explicitly generated or mechanical files are labeled safe to skim.
 - **Claude reviews keep successful output when stderr also warns about an unavailable model.** Malformed results and nonzero exits cannot publish verdicts or trigger fallback.
 - **Fallback routing is cached only after a successful run.** Failed fallback models and floors are retried from the preferred rung next time; Copilot receives the selected reasoning effort for every supported model family.
 - **Ranged Copilot reviews read the exact frozen diff from a protected artifact.** The existing `review.copilotDiffDelivery` values remain accepted, and symlink, path, and pre-dispatch checks still apply.

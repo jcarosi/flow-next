@@ -31,6 +31,8 @@ No application project changes or workflows. No shared installation activation o
 
 The official 9.3.1 release is ahead of the verified central source. A separate candidate makes source integration inspectable without changing the active checkout or clients. Compatibility is checked against the known contribution matrix and current upstream state. The authorized Codex review route is temporary for this maintenance task, does not change global or repository defaults, and is not permission to substitute another reviewer if it is unavailable.
 
+The retained host-neutral search guard has a documented unattended-trust purpose: Flow-Next 9.2.0 records that native hosts lacked Grep/Glob while scout instructions had forbidden read-only shell search, leaving verification unable to inspect source. The current canonical instructions pass the guard. A reviewer noted a possible false positive for hypothetical future valid prose; defer that nonblocking P2 because there is no current canonical counterexample, and removing the guard would weaken the existing verification control. Revisit only with a concrete valid canonical case and a replacement guard that preserves the unattended safety property (G4).
+
 ## Conversation Evidence
 
 The user authorized this exceptional reviewer route in the current conversation: “tu peux utiliser codex/gpt 6.1 xhigh pour les reviews exceptionnnelement”. The per-run route is `codex:gpt-6.1-sol:xhigh`; do not use the ordinary configured Qwen route or silently fall back to another model or harness.

@@ -30515,13 +30515,15 @@ def render_pr_cognitive_aid_markdown(artifact: Any) -> str:
                      if record["attentionClass"] == "canonical" and record["summary"].strip()]
         skimmable = [record for record in group["files"]
                      if record["attentionClass"] in ("mechanical", "generated")]
-        if listed and not described:
+        if (group["files"] and not described
+                and all(record["attentionClass"] in ("mechanical", "generated")
+                        for record in group["files"])):
             whole.append(f"{number}. {title}")
             continue
         loose.extend((number, record) for record in skimmable)
         rids = list(dict.fromkeys([*requirements(group),
                                    *(rid for record in group["files"]
-                                     for rid in record.get("rIds") or [])]))
+                                     for rid in requirements(record))]))
         tag = f" [{', '.join(rids)}]" if rids else ""
         if order:
             order.append("")
