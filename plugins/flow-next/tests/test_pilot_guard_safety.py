@@ -32,7 +32,7 @@ from flowctl_test_support import FLOWCTL_CMD  # noqa: E402
 flowctl = pilot_support.flowctl
 
 AUTO_MD = PLUGIN / "skills" / "flow-next-flow" / "auto.md"
-DOCS_DIR = Path("docs/oap-v2")
+DOCS_DIR = Path("docs/user-work")
 DOC_COUNT = 5
 DISPATCH_MARKER = "REVIEWER_DISPATCH_MARKER"
 
@@ -59,7 +59,7 @@ class PilotGuardSafety(unittest.TestCase):
             (self.docs / f"fixture-{index}.md").write_text(
                 f"baseline {index}\n", encoding="utf-8"
             )
-        pilot_support._git(self.repo, "add", "docs/oap-v2")
+        pilot_support._git(self.repo, "add", "docs/user-work")
         pilot_support._git(self.repo, "commit", "-qm", "fixture docs baseline")
         initialized = self._run("init", "--json")
         self.assertEqual(initialized.returncode, 0, initialized.stderr or initialized.stdout)
@@ -116,7 +116,7 @@ class PilotGuardSafety(unittest.TestCase):
                 files.extend(path for path in root.rglob("*") if path.is_file())
         return {path.relative_to(self.repo).as_posix(): path.read_bytes() for path in sorted(files)}
 
-    def _change_oap_docs(self) -> None:
+    def _change_project_docs(self) -> None:
         for index in range(1, DOC_COUNT + 1):
             (self.docs / f"fixture-{index}.md").write_text(
                 f"changed {index}\n", encoding="utf-8"
@@ -159,7 +159,7 @@ class PilotGuardSafety(unittest.TestCase):
     @_POSIX_BASH
     def test_dirty_ready_tree_is_listed_and_stops_before_dispatch(self) -> None:
         spec_id = self._create_spec(ready=True)
-        self._change_oap_docs()
+        self._change_project_docs()
         before = self._project_bytes()
         ledger_before = self.ledger.read_bytes()
 
@@ -171,8 +171,8 @@ class PilotGuardSafety(unittest.TestCase):
         dirty_paths = {row[3:] for row in dirty}
         self.assertEqual(
             dirty_paths,
-            {f"docs/oap-v2/fixture-{index}.md" for index in range(1, DOC_COUNT + 1)}
-            | {"docs/oap-v2/untracked.md"},
+            {f"docs/user-work/fixture-{index}.md" for index in range(1, DOC_COUNT + 1)}
+            | {"docs/user-work/untracked.md"},
         )
         self._assert_dispatch_guard_stops(result)
         self.assertEqual(self._project_bytes(), before)
@@ -199,7 +199,7 @@ class PilotGuardSafety(unittest.TestCase):
     @_POSIX_BASH
     def test_dirty_unready_spec_stops_for_dirty_tree_before_selection(self) -> None:
         spec_id = self._create_spec(ready=False)
-        self._change_oap_docs()
+        self._change_project_docs()
         before = self._project_bytes()
         ledger_before = self.ledger.read_bytes()
 
@@ -213,14 +213,17 @@ class PilotGuardSafety(unittest.TestCase):
 
     def test_flow_only_changes_do_not_enter_the_dirty_guard(self) -> None:
         spec_id = self._create_spec(ready=True)
-        flow_tmp = self.repo / ".flow" / "tmp"
-        flow_tmp.mkdir(parents=True, exist_ok=True)
-        (flow_tmp / "flow-only-fixture.md").write_text("fixture\n", encoding="utf-8")
+        spec_path = next((self.repo / ".flow").rglob(f"{spec_id}.json"))
+        relative_spec_path = spec_path.relative_to(self.repo).as_posix()
+        pilot_support._git(self.repo, "add", "-f", ".flow")
+        pilot_support._git(self.repo, "commit", "-qm", "fixture flow state baseline")
+        spec_path.write_text(
+            spec_path.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+        )
         status = pilot_support._git(
             self.repo, "status", "--porcelain", "--untracked-files=all"
         ).stdout.splitlines()
-        self.assertTrue(status)
-        self.assertTrue(all(row[3:].startswith(".flow/") for row in status), status)
+        self.assertIn(f" M {relative_spec_path}", status)
 
         result = self._snapshot(spec_id)
 
